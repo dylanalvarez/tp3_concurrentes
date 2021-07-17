@@ -1,0 +1,72 @@
+ponele que arrancamos con bully + centralizado
+arrancamos en distintas terminales del modo
+    ./tp3_node --port 9090 --neighbours localhost:8080 localhost:7070 localhost:6060
+asumimos que la persona tras la terminal va a agregar la primera nota después de haber iniciado todos los nodos
+    (despues de que logueeen "READY" o algo asi)
+asumimos que la persona tras la terminal no va a agregar nuevos nodos después de el agregado de la primera nota
+asumimos que una vez que cae un nodo cayó para siempre y no se vuelve a reconectar
+
+cuando arranca un nodo, ejecuta un bully para descubrir el coordinador
+
+los nodos reciben por consola un comando del tipo
+    agregar_nota dylan 10
+y tras eso, reservan la seccion critica al coordinator y cuando la tienen, le envian el nuevo registro
+y el coordinator lo escribe en su estado y lo broadcastea a todos los nodos (incluido el que recibio el comando por consola)
+
+los nodos tambien reciben por consola un comando del tipo
+    ver_notas
+al recibir esto, se recorre el array de structs (nombre, nota, hash) en orden de inserción y se verifica:
+la primer nota debe tener hash vacío ("").
+la segunda nota debe tener "#{primer_nota.nombre}#{primer_nota.nota}#{primer_nota.hash}" hasheado en su field hash
+la tercer nota debe tener "#{segunda_nota.nombre}#{segunda_nota.nota}#{segunda_nota.hash}" hasheado en su field hash
+y así sucesivamente.
+cuando no se cumpla esta condición se va a dejar de recorrer las notas y se va a mostrar un mensaje del estilo
+"DATOS INCONSISTENTES. PREGUNTALE A OTRO NODO"
+
+los nodos tambien reciben por consola un comando del tipo
+    coordinador: skippeate mensajes al localhost:3030
+en el que skippeás cada tantos mensajes de que hay una nueva not (puede ser un valor fijo, deterministico, da igual)
+de modo tal que se pueda triggerear el estado de datos inconsistentes.
+
+todo mensaje tiene timeout, y tras ese tiempo se reintenta. por ejemplo, si reservo seccion critica y tras 3 segundos no
+responde el coordinator, vuelvo a enviarle el mensaje de reservar seccion critica, y voy a disparar un bully.
+si efectivamente corresponde que espere, el coordinator va a mirar la queue, ver que estoy esperando y no hacer nada.
+si el coordinator está caído, por bully sabré cuál es el nuevo coodinator y el reintento posterior a su establecimiento
+como tal va a ser exitoso.
+
+----------
+
+STEPS
+
+1) corriendo via tests unitarios:
+    - hacete una funcion generateHash(nombre, nota, hashNotaAnterior) que dada una nota te da el hash para insertar en la siguiente
+        (para uso del coordinator)
+    - hacete un class Blockchain que tenga metodos:
+        agregarNota(nombre, nota, hash) que agrega a su array de notas una nueva tupla (nombre, nota, hash)
+        imprimirNotas() que recorre las notas en orden de inserción validando como se especificó arriba
+            para validar llamo a generateHash con el nombre y nota del actual y el hash de la nota anterior,
+            y lo comparo con el hash que efectivamente tengo en el record actual
+
+2) demo basica algoritmo centralizado
+    el envío de mensajes a otros nodos pasa siempre por un metodo enviarMensaje() de modo tal que bully se pueda enganchar de ahi
+
+    levantamos N nodos, el coordinador se define via flag --coordinator o algo asi
+
+    si soy coordinator, tengo que tener un thread escuchando mensajes de agregar nota, cuando recibo ese mensaje imprimo la nota a agregar
+
+    reciben comandos por stdin:
+        - agregar_nota dylan 10
+            trato de entrar a la seccion critica
+            cuando entro envio un mensaje al coordinator para agregar la nota
+        - ver notas
+            imprimo "me mandaron a ver notas" y no mucho mas
+        - coordinador: skippeate mensajes al localhost:3030
+            hago eso mismo
+
+3) agregar bully
+    cambiar el centralizado para que en vez de requerir un flag --coordinator, se corra bully al principio,
+    y al error de network o timeout de un enviarMensaje()
+
+4) conectar el algoritmo centralizado con la implementacion de Blockchain + generateHash()
+
+5) profit
