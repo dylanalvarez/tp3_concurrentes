@@ -5,6 +5,70 @@ use std::net::UdpSocket;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
+struct DistMutex {
+    port_to_coordinator: usize,
+    socket_to_coordinator: UdpSocket,
+}
+
+impl DistMutex {
+    fn new(port_to_coordinator: usize, port_receive_from_coordinator: usize) -> DistMutex {
+        let socket_to_coordinator = match UdpSocket::bind(local_address_with_port(
+            &port_receive_from_coordinator.to_string(),
+        )) {
+            Ok(socket) => socket,
+            Err(_error) => {
+                panic!("Couldn't start to listen on listen port. Port in use?");
+            }
+        };
+
+        let new_dist_mutex = DistMutex {
+            port_to_coordinator,
+            socket_to_coordinator,
+        };
+
+        let cloned_new_dist_mutex = new_dist_mutex.clone();
+        thread::spawn(move || cloned_new_dist_mutex.listen());
+
+        new_dist_mutex
+    }
+
+    fn clone(&self) -> DistMutex {
+        DistMutex {
+            socket_to_coordinator: self.socket_to_coordinator.try_clone().unwrap(),
+            port_to_coordinator: self.port_to_coordinator.clone(),
+        }
+    }
+
+    fn acquire(&mut self) {
+        self.socket_to_coordinator
+            .send_to(
+                "ACQUIRE".as_bytes(),
+                local_address_with_port(&self.port_to_coordinator.to_string()),
+            )
+            .unwrap();
+
+        // TODO condvar(acquiring) que bloquee esta funcion y deje retornar solo cuando se haya obtenido respuesta del ACQUIRE
+    }
+
+    fn release(&mut self) {
+        self.socket_to_coordinator
+            .send_to(
+                "RELEASE".as_bytes(),
+                local_address_with_port(&self.port_to_coordinator.to_string()),
+            )
+            .unwrap();
+    }
+
+    fn listen(&self) {
+        loop {
+            let mut buf = [0; size_of::<usize>() + 1];
+            let (size, from) = self.socket_to_coordinator.recv_from(&mut buf).unwrap();
+            println!("Received bytes {:?} on DistMutex from: {:?}", size, from);
+            // TODO: if ACQUIRE_RESPONSE: liberar condvar(acquiring) para indicar que se tiene el lock
+        }
+    }
+}
+
 pub struct BlockchainNode {
     port: usize,
     socket: UdpSocket,
