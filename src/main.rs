@@ -1,9 +1,12 @@
 mod blockchain;
 
-use std::{env, thread};
 use crate::blockchain::Blockchain;
-use std::net::{UdpSocket};
-use std::time::Duration;
+use std::io::{stdin, stdout, Write};
+use std::mem::size_of;
+use std::net::UdpSocket;
+use std::process::exit;
+use std::sync::{Arc, Condvar, Mutex};
+use std::{env, thread};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -16,26 +19,15 @@ fn main() {
     }
 
     let port = args[1].clone();
-    let numeric_port = args[1].clone().parse::<i32>().unwrap();
-    let listen_thread_handle = thread::spawn(move || { start_listen_udp(&port.to_owned()) });
-
-    let neighbor_addresses: Vec<String> = args.into_iter()
+    let neighbor_addresses: Vec<String> = args
+        .into_iter()
         .enumerate()
         .filter_map(|(i, e)| if i > 1 { Some(e) } else { None })
         .collect();
     println!("neighbor_addresses = {:?}", neighbor_addresses);
 
-    let mut neighbor_handles = vec!();
-    let mut i = 1;
-    for neighbor_addr in neighbor_addresses.iter() {
-        let addr = neighbor_addr.clone();
-        println!("Ping to neighbor with addr: {:?}", addr);
-        let port_for_neighbor_response = numeric_port + i * 1000;
-        neighbor_handles.push(thread::spawn(move || { ping_neighbor(addr, port_for_neighbor_response) }));
-        i += 1;
-    }
-
-    neighbor_handles.into_iter().for_each(|h| { h.join(); });
+    let listen_thread_handle =
+        thread::spawn(move || start_node(&port.to_owned(), neighbor_addresses));
     listen_thread_handle.join();
 
     let mut blockchain = Blockchain::new();
@@ -44,48 +36,156 @@ fn main() {
     println!("is valid? {}", blockchain.is_valid());
 }
 
-fn local_address_with_port(port: &String) -> String { "127.0.0.1:".to_owned() + port }
+struct Node {
+    id: usize,
+    socket: UdpSocket,
+    leader_port: Arc<(Mutex<Option<usize>>, Condvar)>,
+    neighbor_addresses: Vec<String>,
+    blockchain: Blockchain,
+}
 
-fn start_listen_udp(port: &String) {
-    match UdpSocket::bind(local_address_with_port(port)) {
-        Ok(socket) => {
-            println!("Starting to listen on port {:?}", port);
-            loop {
-                let mut buf = [0; 10];
-                let (size, from) = socket.recv_from(&mut buf).unwrap();
-                println!("Received bytes {:?} from: {:?}", size, from);
-                socket.send_to("PONG".as_bytes(), from).unwrap();
+impl Node {
+    fn new(port: usize, neighbor_addresses: Vec<String>) -> Node {
+        let self_addr = local_address_with_port(&port.to_string());
+        println!("Node address for neighbor messages: {:?}", self_addr);
+        let socket = match UdpSocket::bind(self_addr) {
+            Ok(socket) => socket,
+            Err(_error) => {
+                panic!("Couldn't start to listen on listen port. Port in use?");
             }
+        };
+
+        let new_node = Node {
+            id: port,
+            socket,
+            leader_port: Arc::new((Mutex::new(Some(port)), Condvar::new())),
+            neighbor_addresses,
+            blockchain: Blockchain::new(),
+        };
+
+        println!("Starting to listen on port: {:?}", port);
+        let clone = new_node.clone();
+        thread::spawn(move || clone.listen());
+
+        println!(
+            "Starting to ping all neighbors: {:?}",
+            new_node.neighbor_addresses
+        );
+        new_node.clone().ping_neighbors();
+
+        // TODO: start leader election
+        // new_node.find_new();
+        new_node
+    }
+
+    fn clone(&self) -> Node {
+        Node {
+            id: self.id,
+            socket: self.socket.try_clone().unwrap(),
+            leader_port: self.leader_port.clone(),
+            neighbor_addresses: self.neighbor_addresses.clone(),
+            blockchain: self.blockchain.clone(),
         }
-        Err(_error) => {
-            panic!(
-                "Couldn't start to listen on assigned port. Port in use?"
-            );
+    }
+
+    fn listen(&self) {
+        loop {
+            let mut buf = [0; size_of::<usize>() + 1];
+            let (size, from) = self.socket.recv_from(&mut buf).unwrap();
+            println!("Received bytes {:?} from neighbor: {:?}", size, from);
+        }
+    }
+
+    fn ping_neighbors(&self) {
+        let mut neighbor_handles = vec![];
+        for neighbor_addr in self.neighbor_addresses.iter() {
+            let addr = neighbor_addr.clone();
+            let me = self.clone();
+            neighbor_handles.push(thread::spawn(move || me.ping_neighbor(addr)));
+        }
+        neighbor_handles.into_iter().for_each(|h| {
+            h.join();
+        });
+    }
+
+    fn ping_neighbor(&self, dest_addr: String) {
+        println!("Sending ping to neighbor with addr: {:?}", dest_addr);
+        self.socket.send_to("PING".as_bytes(), dest_addr).unwrap();
+    }
+
+    fn add_grade(&self, _name: String, _note: f64) {
+        println!("Node received add_grade");
+        // TODO
+    }
+
+    fn print(&self) {
+        println!("Print current blockchain");
+        if self.blockchain.is_valid() {
+            // self.blockchain.print();
         }
     }
 }
 
-fn ping_neighbor(dest_addr: String, response_port: i32) {
-    // TODO: reusar el socket de escucha para hacer el send_to a los vecinos
-    let neighbor_response_addr = local_address_with_port(&response_port.to_string());
-    println!("Addr for neighbor responses: {:?}", neighbor_response_addr);
-    match UdpSocket::bind(neighbor_response_addr) {
-        Ok(socket) => {
-            thread::sleep(Duration::from_millis(10000));
-            socket.send_to("PING".as_bytes(), dest_addr).unwrap();
-            println!("Sent PING to neighbor");
-            let mut buf = [0; 10];
-            loop {
-                println!("Starting to listen for neighbor response");
-                socket.set_read_timeout(None);
-                let (size, from) = socket.recv_from(&mut buf).unwrap();
-                println!("Received bytes {:?} from neighbor: {:?}", size, from);
-            }
+fn local_address_with_port(port: &String) -> String {
+    "127.0.0.1:".to_owned() + port
+}
+
+fn start_node(port: &String, neighbor_addresses: Vec<String>) {
+    let numeric_port = port.clone().parse::<usize>().unwrap();
+    let node = Node::new(numeric_port, neighbor_addresses.clone());
+    loop {
+        prompt_loop(node.clone());
+    }
+}
+
+fn prompt_loop(node: Node) {
+    let mut command = String::new();
+    print!("Enter command: ");
+    let _ = stdout().flush();
+    stdin()
+        .read_line(&mut command)
+        .expect("Ups! Didn't understand that :(");
+    if let Some('\n') = command.chars().next_back() {
+        command.pop();
+    }
+    if let Some('\r') = command.chars().next_back() {
+        command.pop();
+    }
+    execute_command(command, node.clone());
+}
+
+fn execute_command(raw_command: String, node: Node) {
+    let parsed_command = raw_command.split(" ").collect::<Vec<&str>>();
+    match parsed_command[0] {
+        "add_grade" => {
+            let student_name = parsed_command[1].to_string();
+            match parsed_command[2].parse() {
+                Ok(grade) => {
+                    println!(
+                        "Received add_grade command with params: {:?} {:?}",
+                        student_name, grade
+                    );
+                    node.add_grade(student_name, grade);
+                }
+                Err(_error) => {
+                    println!("Invalid grade number for add_grade command");
+                }
+            };
         }
-        Err(_error) => {
-            panic!(
-                "Couldn't start to listen on listen port. Port in use?"
-            );
+        "print" => {
+            println!("Received print command");
+            node.print();
+        }
+        "ping" => {
+            println!("Received ping command");
+            node.ping_neighbors();
+        }
+        "quit" => {
+            println!("Received quit command");
+            exit(0);
+        }
+        _ => {
+            println!("Ups! Didn't understand that. Available commands: quit, add_grade, print");
         }
     }
 }

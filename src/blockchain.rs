@@ -1,14 +1,15 @@
-use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
+#[derive(Clone)]
 pub struct BlockchainRecord {
     student_name: String,
     grade: f64,
-    hash: u64
+    hash: u64,
 }
 
 pub struct Blockchain {
-    records: Vec<BlockchainRecord>
+    records: Vec<BlockchainRecord>,
 }
 
 fn hash(a_string: String) -> u64 {
@@ -30,26 +31,27 @@ fn is_valid(record: &BlockchainRecord, previous_record_hash: u64) -> bool {
 
 impl Blockchain {
     pub(crate) fn new() -> Blockchain {
-        Blockchain { records: Vec::new() }
+        Blockchain {
+            records: Vec::new(),
+        }
+    }
+    pub fn clone(&self) -> Blockchain {
+        Blockchain {
+            records: self.records.clone(),
+        }
     }
 
     pub fn add_grade(&mut self, student_name: String, grade: f64) {
         let previous_record_hash = match self.records.last() {
-            None => {0}
-            Some(record) => {record.hash.clone()}
+            None => 0,
+            Some(record) => record.hash.clone(),
         };
-        let hash = generate_hash(
-            &student_name,
+        let hash = generate_hash(&student_name, grade, previous_record_hash);
+        self.records.push(BlockchainRecord {
+            student_name,
             grade,
-            previous_record_hash
-        );
-        self.records.push(
-            BlockchainRecord {
-                student_name,
-                grade,
-                hash
-            }
-        );
+            hash,
+        });
     }
 
     pub fn add_record(&mut self, record: BlockchainRecord) {
@@ -60,7 +62,7 @@ impl Blockchain {
         let mut last_hash = 0;
         for record in &self.records {
             if !is_valid(record, last_hash) {
-                return false
+                return false;
             }
             last_hash = generate_hash(&record.student_name, record.grade, last_hash);
         }
@@ -99,8 +101,8 @@ mod tests {
         blockchain.add_record(BlockchainRecord {
             student_name: String::from("Dylan"),
             grade: 10.0,
-            hash: 0
-        } );
+            hash: 0,
+        });
         assert_eq!(blockchain.is_valid(), false)
     }
 
@@ -112,12 +114,8 @@ mod tests {
         blockchain.add_record(BlockchainRecord {
             student_name: student_name.clone(),
             grade,
-            hash: generate_hash(
-                &student_name,
-                grade,
-                0
-            )
-        } );
+            hash: generate_hash(&student_name, grade, 0),
+        });
         assert_eq!(blockchain.is_valid(), true)
     }
 
@@ -135,13 +133,9 @@ mod tests {
             hash: generate_hash(
                 &second_student_name,
                 second_grade,
-                generate_hash(
-                    &first_student_name,
-                    first_grade,
-                    0
-                )
-            )
-        } );
+                generate_hash(&first_student_name, first_grade, 0),
+            ),
+        });
         assert_eq!(blockchain.is_valid(), true)
     }
 }
