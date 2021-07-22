@@ -1,11 +1,10 @@
 mod blockchain;
+mod blockchain_node;
 
 use crate::blockchain::Blockchain;
+use crate::blockchain_node::BlockchainNode;
 use std::io::{stdin, stdout, Write};
-use std::mem::size_of;
-use std::net::UdpSocket;
 use std::process::exit;
-use std::sync::{Arc, Condvar, Mutex};
 use std::{env, thread};
 
 fn main() {
@@ -36,122 +35,19 @@ fn main() {
     println!("is valid? {}", blockchain.is_valid());
 }
 
-struct Node {
-    port: usize,
-    socket: UdpSocket,
-    leader_port: Arc<(Mutex<Option<usize>>, Condvar)>,
-    neighbor_addresses: Vec<String>,
-    blockchain: Blockchain,
-}
-
-impl Node {
-    fn new(port: usize, neighbor_addresses: Vec<String>) -> Node {
-        let self_addr = local_address_with_port(&port.to_string());
-        println!("Node address for neighbor messages: {:?}", self_addr);
-        let socket = match UdpSocket::bind(self_addr) {
-            Ok(socket) => socket,
-            Err(_error) => {
-                panic!("Couldn't start to listen on listen port. Port in use?");
-            }
-        };
-
-        let new_node = Node {
-            port,
-            socket,
-            leader_port: Arc::new((Mutex::new(Some(port)), Condvar::new())),
-            neighbor_addresses,
-            blockchain: Blockchain::new(),
-        };
-
-        println!("Starting to listen on port: {:?}", port);
-        let clone = new_node.clone();
-        thread::spawn(move || clone.listen());
-
-        println!(
-            "Starting to ping all neighbors: {:?}",
-            new_node.neighbor_addresses
-        );
-        new_node.clone().ping_neighbors();
-
-        // TODO: start leader election
-        // new_node.find_new();
-        new_node
-    }
-
-    fn clone(&self) -> Node {
-        Node {
-            port: self.port,
-            socket: self.socket.try_clone().unwrap(),
-            leader_port: self.leader_port.clone(),
-            neighbor_addresses: self.neighbor_addresses.clone(),
-            blockchain: self.blockchain.clone(),
-        }
-    }
-
-    fn listen(&self) {
-        loop {
-            let mut buf = [0; size_of::<usize>() + 1];
-            let (size, from) = self.socket.recv_from(&mut buf).unwrap();
-            println!("Received bytes {:?} from neighbor: {:?}", size, from);
-        }
-    }
-
-    fn ping_neighbors(&self) {
-        let mut neighbor_handles = vec![];
-        for neighbor_addr in self.neighbor_addresses.iter() {
-            let addr = neighbor_addr.clone();
-            let me = self.clone();
-            neighbor_handles.push(thread::spawn(move || me.ping_neighbor(addr)));
-        }
-        neighbor_handles.into_iter().for_each(|h| {
-            h.join();
-        });
-    }
-
-    fn ping_neighbor(&self, dest_addr: String) {
-        println!("Sending ping to neighbor with addr: {:?}", dest_addr);
-        self.socket.send_to("PING".as_bytes(), dest_addr).unwrap();
-    }
-
-    fn make_coordinator(&self) {
-        println!("Node received make_coordinator");
-        match (*self).leader_port.0.lock() {
-            Ok(mut leader_port) => {
-                *leader_port = Option::from((*self).port);
-            }
-            Err(error) => {
-                panic!("{}", error.to_string())
-            }
-        }
-        println!("New coordinator: {:?}", self.leader_port);
-    }
-
-    fn add_grade(&self, _name: String, _note: f64) {
-        println!("Node received add_grade");
-        // TODO
-    }
-
-    fn print(&self) {
-        println!("Print current blockchain");
-        if self.blockchain.is_valid() {
-            // self.blockchain.print();
-        }
-    }
-}
-
 fn local_address_with_port(port: &String) -> String {
     "127.0.0.1:".to_owned() + port
 }
 
 fn start_node(port: &String, neighbor_addresses: Vec<String>) {
     let numeric_port = port.clone().parse::<usize>().unwrap();
-    let node = Node::new(numeric_port, neighbor_addresses.clone());
+    let node = BlockchainNode::new(numeric_port, neighbor_addresses.clone());
     loop {
         prompt_loop(node.clone());
     }
 }
 
-fn prompt_loop(node: Node) {
+fn prompt_loop(node: BlockchainNode) {
     let mut command = String::new();
     print!("Enter command: ");
     let _ = stdout().flush();
@@ -167,7 +63,7 @@ fn prompt_loop(node: Node) {
     execute_command(command, node.clone());
 }
 
-fn execute_command(raw_command: String, node: Node) {
+fn execute_command(raw_command: String, node: BlockchainNode) {
     let parsed_command = raw_command.split(" ").collect::<Vec<&str>>();
     match parsed_command[0] {
         "add_grade" => {
