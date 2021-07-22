@@ -37,7 +37,7 @@ fn main() {
 }
 
 struct Node {
-    id: usize,
+    port: usize,
     socket: UdpSocket,
     leader_port: Arc<(Mutex<Option<usize>>, Condvar)>,
     neighbor_addresses: Vec<String>,
@@ -56,7 +56,7 @@ impl Node {
         };
 
         let new_node = Node {
-            id: port,
+            port,
             socket,
             leader_port: Arc::new((Mutex::new(Some(port)), Condvar::new())),
             neighbor_addresses,
@@ -80,7 +80,7 @@ impl Node {
 
     fn clone(&self) -> Node {
         Node {
-            id: self.id,
+            port: self.port,
             socket: self.socket.try_clone().unwrap(),
             leader_port: self.leader_port.clone(),
             neighbor_addresses: self.neighbor_addresses.clone(),
@@ -111,6 +111,19 @@ impl Node {
     fn ping_neighbor(&self, dest_addr: String) {
         println!("Sending ping to neighbor with addr: {:?}", dest_addr);
         self.socket.send_to("PING".as_bytes(), dest_addr).unwrap();
+    }
+
+    fn make_coordinator(&self) {
+        println!("Node received make_coordinator");
+        match (*self).leader_port.0.lock() {
+            Ok(mut leader_port) => {
+                *leader_port = Option::from((*self).port);
+            }
+            Err(error) => {
+                panic!("{}", error.to_string())
+            }
+        }
+        println!("New coordinator: {:?}", self.leader_port);
     }
 
     fn add_grade(&self, _name: String, _note: f64) {
@@ -176,16 +189,20 @@ fn execute_command(raw_command: String, node: Node) {
             println!("Received print command");
             node.print();
         }
-        "ping" => {
-            println!("Received ping command");
-            node.ping_neighbors();
-        }
         "quit" => {
             println!("Received quit command");
             exit(0);
         }
+        "ping" => {
+            println!("Received ping command");
+            node.ping_neighbors();
+        }
+        "make_coordinator" => {
+            println!("Received make_coordinator command");
+            node.make_coordinator();
+        }
         _ => {
-            println!("Ups! Didn't understand that. Available commands: quit, add_grade, print");
+            println!("Ups! Didn't understand that. Available commands: add_grade, print, quit, ping, make_coordinator");
         }
     }
 }
