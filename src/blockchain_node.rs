@@ -108,11 +108,12 @@ impl BlockchainNode {
         let clone = new_node.clone();
         thread::spawn(move || clone.listen());
 
-        println!(
-            "Starting to ping all neighbors: {:?}",
-            new_node.neighbor_addresses
-        );
-        new_node.clone().ping_neighbors();
+        new_node.begin_election();
+        // println!(
+        //     "Starting to ping all neighbors: {:?}",
+        //     new_node.neighbor_addresses
+        // );
+        // new_node.clone().ping_neighbors();
 
         // TODO: start leader election
         // new_node.find_new();
@@ -133,29 +134,33 @@ impl BlockchainNode {
 
     pub fn handle_incoming_message(&self, message: &str, sender: &str) -> () {
         if let Some(election_message) = ElectionMessage::from_bytes(message.as_bytes()) {
-            match election_message {
-                ElectionMessage::Election => {
-                    println!("Quieren hacer elecciones desde {:?} y yo soy {:?}!", sender, self.port);
-                    if let Some(port) = ip_parser::get_port_from_dir(sender) {
-                        if self.port > port {
-                            let message_to_send = ElectionMessage::OkElection.as_bytes();
-                            self.socket.send_to(&message_to_send, sender).unwrap();
-                            let me = self.clone();
-                            thread::spawn(move || me.begin_election());
-                        }
+            self.process_election_message(election_message, sender)
+        }
+    }
+
+    fn process_election_message(&self, election_message: ElectionMessage, sender: &str) -> () {
+        match election_message {
+            ElectionMessage::Election => {
+                println!("Quieren hacer elecciones desde {:?} y yo soy {:?}!", sender, self.port);
+                if let Some(port) = ip_parser::get_port_from_dir(sender) {
+                    if self.port > port {
+                        let message_to_send = ElectionMessage::OkElection.as_bytes();
+                        self.socket.send_to(&message_to_send, sender).unwrap();
+                        let me = self.clone();
+                        thread::spawn(move || me.begin_election());
                     }
-                },
-                ElectionMessage::Coordinator => {
-                    *self.leader_port.0.lock().unwrap() = Some(ip_parser::get_port_from_dir(sender).unwrap());
-                    *self.is_in_election.0.lock().unwrap() = false;
-                    self.is_in_election.1.notify_all();
-                    println!("Mi nuevo coordinador es {:?}", *self.leader_port.0.lock().unwrap());
-                },
-                ElectionMessage::OkElection => {
-                    println!("Recibi OkElection. No seré el coordinador.");
-                    *self.got_ok.0.lock().unwrap() = true;
-                    self.got_ok.1.notify_all();
                 }
+            },
+            ElectionMessage::Coordinator => {
+                *self.leader_port.0.lock().unwrap() = Some(ip_parser::get_port_from_dir(sender).unwrap());
+                *self.is_in_election.0.lock().unwrap() = false;
+                self.is_in_election.1.notify_all();
+                println!("Mi nuevo coordinador es {:?}", *self.leader_port.0.lock().unwrap());
+            },
+            ElectionMessage::OkElection => {
+                println!("Recibi OkElection. No seré el coordinador.");
+                *self.got_ok.0.lock().unwrap() = true;
+                self.got_ok.1.notify_all();
             }
         }
     }
