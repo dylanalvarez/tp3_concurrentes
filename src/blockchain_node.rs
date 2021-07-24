@@ -249,9 +249,10 @@ impl BlockchainNode {
         const TIMEOUT: Duration = Duration::from_secs(3);
         let got_ok = self.got_ok.1.wait_timeout_while(self.got_ok.0.lock().unwrap(), TIMEOUT, |got_it| !*got_it );
         if !*got_ok.unwrap().0 {
-            self.make_leader()
+            self.make_leader();
+            *self.is_in_election.0.lock().unwrap() = false;
         } else {
-            self.is_in_election.1.wait_while(self.is_in_election.0.lock().unwrap(), |is_in_election| *is_in_election );
+            let _ = self.is_in_election.1.wait_while(self.is_in_election.0.lock().unwrap(), |is_in_election| *is_in_election );
         }
     }
 
