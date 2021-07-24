@@ -1,5 +1,7 @@
 mod blockchain;
 mod blockchain_node;
+mod ip_parser;
+mod election_message;
 
 use crate::blockchain::Blockchain;
 use crate::blockchain_node::BlockchainNode;
@@ -35,9 +37,9 @@ fn main() {
     println!("is valid? {}", blockchain.is_valid());
 }
 
-fn local_address_with_port(port: &String) -> String {
-    "127.0.0.1:".to_owned() + port
-}
+// fn local_address_with_port(port: &String) -> String {
+//     "127.0.0.1:".to_owned() + port
+// }
 
 fn start_node(port: &String, neighbor_addresses: Vec<String>) {
     let numeric_port = port.clone().parse::<usize>().unwrap();
@@ -96,6 +98,11 @@ fn execute_command(raw_command: String, node: BlockchainNode) {
         "make_coordinator" => {
             println!("Received make_coordinator command");
             node.make_coordinator();
+        }
+
+        "begin_election" => {
+            println!("Received begin_election command");
+            node.begin_election();
         }
         _ => {
             println!("Ups! Didn't understand that. Available commands: add_grade, print, quit, ping, make_coordinator");
