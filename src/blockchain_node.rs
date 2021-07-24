@@ -221,7 +221,6 @@ impl BlockchainNode {
     /// Comienza el proceso de eleccion de lider. 
     /// Al finalizar, el nodo con número de puerto mas grande es quien queda como coordinador.
     pub fn begin_election(&self) {
-        // TODO: Considerar que pasa si ya se encontraba en proceso de eleccion de Lider.
         if *self.is_in_election.0.lock().unwrap() {
             return
         }
