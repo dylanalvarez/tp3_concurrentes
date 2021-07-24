@@ -104,6 +104,10 @@ fn execute_command(raw_command: String, node: BlockchainNode) {
             println!("Received begin_election command");
             node.begin_election();
         }
+
+        "clear" => {
+            print!("{esc}[2J{esc}[1;1H", esc = 27 as char);
+        }
         _ => {
             println!("Ups! Didn't understand that. Available commands: add_grade, print, quit, ping, make_coordinator");
         }
