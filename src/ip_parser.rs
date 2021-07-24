@@ -3,14 +3,10 @@ pub fn local_address_with_port(port: &String) -> String {
 }
 
 pub fn get_port_from_dir(dir: &str) -> Option<usize> {
-    match  dir.split(':').last(){
-        Some(port) => {
-            Some(port.parse::<usize>().unwrap())
-        }
-        None => {
-            None
-        }
-    } 
+    match dir.split(':').last() {
+        Some(port) => Some(port.parse::<usize>().unwrap()),
+        None => None,
+    }
 }
 
 #[cfg(test)]
@@ -19,9 +15,6 @@ mod tests {
 
     #[test]
     fn test_parse_ip() {
-        assert_eq!(
-            Some(8080),
-            get_port_from_dir("127.0.0.1:8080")
-        )
+        assert_eq!(Some(8080), get_port_from_dir("127.0.0.1:8080"))
     }
 }

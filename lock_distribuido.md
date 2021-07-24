@@ -1,27 +1,46 @@
 # Algoritmo de Lock distribuido
 
 ## Algoritmo
-- 1.1. Creo DistMutex pasandole el socket del coordinator. Va a tener condvars: 'acquiring' (solo usada si soy coordinator), 'taken', 'timeout_acquire', 'timeout_release'; y una queue: pending_locks (solo usada si soy coordinator)
-- 1.2. Envio acquire() por el socket, arranco a contar timeout_acquire, y blockeo esta funcion con condvar: acquiring=true
-   - 1.2.1. si se cumplio timeout_acquire sin haber sido reseteado (cuando se recibe el ok_acquire) --> disparar leader election y reintentar
-- 1.3. Envio release() por el socket y no espero nada
-- 1.4. Recibo acquire() por el socket
-   - 1.4.1. Si soy el coordinador
-      - 1.4.1.1. Si nadie tiene tomado lock (taken=false):
-         - 1.4.1.1.1. pongo condvar taken=true
-         - 1.4.1.1.2. arranco a contar timeout_release
-            - 1.4.1.1.2.1. si se cumple el timeout_release (alguien que pidio el lock nunca lo liberó): poner condvar taken=false
-         - 1.4.1.1.3. respondo ok_acquire() por el socket
-      - 1.4.1.2. Si alguien tiene tomado el lock (taken=true): encolo la address que me vino por el socket en la queue pending_locks
-   - 1.4.2. Si no soy el coordinador --> ignoro
-- 1.5. Recibo ok_acquire() por el socket
-   - 1.5.1. Si soy el coordinador o si no lo soy
-      - 1.5.1.1. Pongo acquiring=false, reseteo timeout_acquire y dejo continuar al que llamo a la funcion acquire
-- 1.6. Recibo release() por el socket
-   - 1.6.1. Si soy el coordinador
-      - 1.6.1.1. Si nadie tiene tomado el lock -> ignoro
-      - 1.6.1.2. Si alguien tiene tomado el lock (taken=true)
-         - 1.6.1.2.1. pongo condvar taken=false
-         - 1.6.1.2.2. reseteo timeout_release
-         - 1.6.1.2.3. repito hasta que queue pending_locks este vacía: desencolo de la queue pending_locks y vuelvo a 1.4
-   - 1.6.2. Si no soy el coordinador --> ignoro
+- 1. Creo DistMutex pasandole el socket del nodo y la addr del coordinator. Va a tener mutex: 'taken', 'lock_owner' ; 
+     (mutex<bool>,condvar): 'got_ok_acquire', 'got_ok_release' ; queue: 'pending_locks'
+- 2. Función acquire()
+    - 1. Si soy el coordinador o no
+        - 1. Si 'taken'==true --> no hacer nada, ya tengo el lock
+        - 2. Si 'taken'==false
+            - 1. Enviar ACQUIRE por el socket hacia el coordinador (puede ser hacia mi mismo)
+            - 2. wait_timeout_while('got_ok_acquire', TIMEOUT_OK_ACQUIRE)
+                - 1. if 'got_ok_acquire'==true
+                    - 1. poner mutex 'taken'=true y liberar control
+                - 2. else (timeout) --> disparar leader election y reintentar
+- 3. Función release()
+    - 1. Si soy el coordinador
+        - 1. Si 'taken'==true
+            - 1. Si 'lock_owner'==yo
+                - 1. Enviar RELEASE por el socket hacia el coordinador
+                - 2. resetear mutex 'taken'=false y 'got_ok_acquire'=false y liberar control
+      - 2. Si no soy el coordinador
+        - 1. Si 'taken'==true
+            - 1. Enviar RELEASE por el socket hacia el coordinador
+            - 2. resetear mutex 'taken'=false y 'got_ok_acquire'=false y liberar control
+- 4. Recibo ACQUIRE por el socket
+    - 1. Si soy el coordinador
+        - 1. Si 'taken'==true --> encolar addr del que pidió el ACQUIRE en la queue 'pending_locks'
+        - 2. Si 'taken'==false
+            - 1. Poner mutex 'taken'=true y 'lock_owner'=addr que vino por el socket
+            - 2. Responder OK_ACQUIRE por el socket
+            - 3. wait_timeout_while('got_ok_release', TIMEOUT_OK_RELEASE)
+                - 1. if 'got_ok_release'==false --> Poner mutex 'taken'=false, 'lock_owner'=null, desencolar de 'pending_locks' y volver a 4.1
+                - 2. if 'got_ok_release'==true --> Poner mutex 'taken'=false, 'lock_owner'=null, 'got_ok_release'=false
+    - 2. Si no soy el coordinador --> ignoro
+- 5. Recibo RELEASE por el socket
+    - 1. Si soy el coordinador
+        - 1. Si 'taken'==false --> ignoro
+        - 2. Si 'taken'==true
+            - 0. Enviar NUEVA_NOTA a todos los nodos
+            - 1. Poner mutex 'taken'=false, 'lock_owner'=null, 'got_ok_release'=true y notify_all, 
+            - 2. mientras 'pending_locks' no este vacía --> desencolar de 'pending_locks' y volver a 4.1
+    - 2. Si no soy el coordinador --> ignoro
+- 6. Recibo OK_ACQUIRE por el socket
+    - 1. Si soy el coordinador --> ignoro
+    - 2. Si no soy el coordinador
+        - 1. Poner condvar 'got_ok_acquire'=true y hacer notify_all

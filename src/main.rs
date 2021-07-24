@@ -1,7 +1,8 @@
+mod acquire_message;
 mod blockchain;
 mod blockchain_node;
-mod ip_parser;
 mod election_message;
+mod ip_parser;
 
 use crate::blockchain::Blockchain;
 use crate::blockchain_node::BlockchainNode;
