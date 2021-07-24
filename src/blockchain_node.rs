@@ -6,6 +6,7 @@ use std::mem::size_of;
 use std::net::UdpSocket;
 use std::sync::{Arc, Condvar, Mutex};
 use std::{thread, u8, usize};
+use std::time::Duration;
 
 struct DistMutex {
     port_to_coordinator: usize,
@@ -78,6 +79,8 @@ pub struct BlockchainNode {
     leader_port: Arc<(Mutex<Option<usize>>, Condvar)>,
     neighbor_addresses: Vec<String>,
     blockchain: Blockchain,
+    got_ok: Arc<(Mutex<bool>, Condvar)>,
+    is_in_election: Arc<(Mutex<bool>, Condvar)>
 }
 
 impl BlockchainNode {
@@ -97,6 +100,8 @@ impl BlockchainNode {
             leader_port: Arc::new((Mutex::new(Some(port)), Condvar::new())),
             neighbor_addresses,
             blockchain: Blockchain::new(),
+            got_ok: Arc::new((Mutex::new(false), Condvar::new())),
+            is_in_election: Arc::new((Mutex::new(false), Condvar::new())),
         };
 
         println!("Starting to listen on port: {:?}", port);
@@ -121,15 +126,36 @@ impl BlockchainNode {
             leader_port: self.leader_port.clone(),
             neighbor_addresses: self.neighbor_addresses.clone(),
             blockchain: self.blockchain.clone(),
+            got_ok: self.got_ok.clone(),
+            is_in_election: self.is_in_election.clone(),
         }
     }
 
-    pub fn handle_incoming_message(&self, str: &str) -> () {
-        if let Some(election_message) = ElectionMessage::from_bytes(str.as_bytes()) {
+    pub fn handle_incoming_message(&self, message: &str, sender: &str) -> () {
+        if let Some(election_message) = ElectionMessage::from_bytes(message.as_bytes()) {
             match election_message {
-                ElectionMessage::Election => println!("Quieren hacer elecciones!"),
-                ElectionMessage::Coordinator => println!("Coordinator!"),
-                ElectionMessage::OkElection => println!("OkElection")
+                ElectionMessage::Election => {
+                    println!("Quieren hacer elecciones desde {:?} y yo soy {:?}!", sender, self.port);
+                    if let Some(port) = ip_parser::get_port_from_dir(sender) {
+                        if self.port > port {
+                            let message_to_send = ElectionMessage::OkElection.as_bytes();
+                            self.socket.send_to(&message_to_send, sender).unwrap();
+                            let me = self.clone();
+                            thread::spawn(move || me.begin_election());
+                        }
+                    }
+                },
+                ElectionMessage::Coordinator => {
+                    *self.leader_port.0.lock().unwrap() = Some(ip_parser::get_port_from_dir(sender).unwrap());
+                    *self.is_in_election.0.lock().unwrap() = false;
+                    self.is_in_election.1.notify_all();
+                    println!("Mi nuevo coordinador es {:?}", *self.leader_port.0.lock().unwrap());
+                },
+                ElectionMessage::OkElection => {
+                    println!("Recibi OkElection. No seré el coordinador.");
+                    *self.got_ok.0.lock().unwrap() = true;
+                    self.got_ok.1.notify_all();
+                }
             }
         }
     }
@@ -137,17 +163,16 @@ impl BlockchainNode {
     pub fn listen(&self) {
         loop {
             let mut buf  = [0; size_of::<usize>() + 1];
-            let mut received : Vec<u8> = Vec::new();
             match self.socket.recv_from(&mut buf) {
                 Ok((size, from)) => {
                     println!("Received bytes {:?} from neighbor: {:?}", size, from);
-                    received = Vec::from(&buf[0..size])
+                    let received = Vec::from(&buf[0..size]);
+                    let str_received = String::from_utf8(received).unwrap();
+                    let neighbor = from.to_string();
+                    self.handle_incoming_message(&str_received, &neighbor);
                 }
                 Err(error) => print!("Error while listening on port: {:?}", error)
             }
-            
-            let str_received = String::from_utf8(received).unwrap();
-            self.handle_incoming_message(&str_received);
         }
     }
 
@@ -196,13 +221,21 @@ impl BlockchainNode {
     /// Comienza el proceso de eleccion de lider. 
     /// Al finalizar, el nodo con número de puerto mas grande es quien queda como coordinador.
     pub fn begin_election(&self) {
+        // TODO: Considerar que pasa si ya se encontraba en proceso de eleccion de Lider.
+        if *self.is_in_election.0.lock().unwrap() {
+            return
+        }
+
+        *self.got_ok.0.lock().unwrap() = false;
+        *self.is_in_election.0.lock().unwrap() = true;
+
         for neighbor in &self.neighbor_addresses {
             match ip_parser::get_port_from_dir(neighbor) {
                 Some(port) => {
-                    if port.parse::<usize>().unwrap() < self.port {
+                    if port < self.port {
                         continue;
                     }
-                    println!("Sending ELECTION to {:?}", neighbor);
+                    println!("\t\tSending ELECTION to {:?}", neighbor);
                     let message_to_send = ElectionMessage::Election.as_bytes();
                     self.socket.send_to(&message_to_send, neighbor).unwrap();
                 }
@@ -211,6 +244,24 @@ impl BlockchainNode {
                     panic!("There is an intruder!")
                 }
             }
+        }
+        println!("Enviando mensaje ELECTION a vecinos. Esperando sus respuestas...");
+        const TIMEOUT: Duration = Duration::from_secs(3);
+        let got_ok = self.got_ok.1.wait_timeout_while(self.got_ok.0.lock().unwrap(), TIMEOUT, |got_it| !*got_it );
+        if !*got_ok.unwrap().0 {
+            self.make_leader()
+        } else {
+            self.is_in_election.1.wait_while(self.is_in_election.0.lock().unwrap(), |is_in_election| *is_in_election );
+        }
+    }
+
+    fn make_leader(&self) {
+        *self.leader_port.0.lock().unwrap() = Some(self.port);
+        println!("Soy el nuevo coordinador! Puerto {:?}", *self.leader_port.0.lock().unwrap());
+        for neighbor in &self.neighbor_addresses {
+            println!("\t\tEnviando mensaje COORDINATOR a {:?}", neighbor);
+            let message_to_send = ElectionMessage::Coordinator.as_bytes();
+            self.socket.send_to(&message_to_send, neighbor).unwrap();
         }
     }
 }

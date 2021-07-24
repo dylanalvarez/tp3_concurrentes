@@ -16,6 +16,8 @@ impl ElectionMessage {
     pub fn from_bytes(bytes: &[u8]) -> Option<ElectionMessage> {
         match bytes {
             b"E" => Some(ElectionMessage::Election),
+            b"O" => Some(ElectionMessage::OkElection),
+            b"C" => Some(ElectionMessage::Coordinator),
             _ => None
         }
     }
