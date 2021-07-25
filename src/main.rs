@@ -1,18 +1,22 @@
+use std::{env, thread};
+use std::io::{stdin, stdout, Write};
+use std::process::exit;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
+use crate::blockchain::Blockchain;
+use crate::blockchain_node::BlockchainNode;
+use crate::logger::log;
+
 mod acquire_message;
 mod blockchain;
 mod blockchain_node;
 mod election_message;
 mod ip_parser;
-
-use crate::blockchain::Blockchain;
-use crate::blockchain_node::BlockchainNode;
-use std::io::{stdin, stdout, Write};
-use std::process::exit;
-use std::{env, thread};
+mod logger;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    println!("Received args = {:?}", args);
+    log(format!("Received args = {:?}", args));
 
     if args.len() - 1 < 2 {
         panic!(
@@ -26,31 +30,25 @@ fn main() {
         .enumerate()
         .filter_map(|(i, e)| if i > 1 { Some(e) } else { None })
         .collect();
-    println!("neighbor_addresses = {:?}", neighbor_addresses);
+    log(format!("neighbor_addresses = {:?}", neighbor_addresses));
 
-    let listen_thread_handle =
-        thread::spawn(move || start_node(&port.to_owned(), neighbor_addresses));
-    listen_thread_handle.join();
-
-    let mut blockchain = Blockchain::new();
-    blockchain.add_grade(String::from("Dylan"), 10.0);
-    blockchain.add_grade(String::from("Gustavo"), 7.99);
-    println!("is valid? {}", blockchain.is_valid());
+    start_node(&port.to_owned(), neighbor_addresses);
 }
-
-// fn local_address_with_port(port: &String) -> String {
-//     "127.0.0.1:".to_owned() + port
-// }
 
 fn start_node(port: &String, neighbor_addresses: Vec<String>) {
     let numeric_port = port.clone().parse::<usize>().unwrap();
-    let node = BlockchainNode::new(numeric_port, neighbor_addresses.clone());
+    let mut node = Arc::new(Mutex::new(BlockchainNode::new(numeric_port, neighbor_addresses.clone())));
+    let cloned_node = node.clone();
+    thread::spawn(move || {
+        BlockchainNode::listen(cloned_node);
+    });
+    BlockchainNode::begin_election(node.clone());
     loop {
         prompt_loop(node.clone());
     }
 }
 
-fn prompt_loop(node: BlockchainNode) {
+fn prompt_loop(node: Arc<Mutex<BlockchainNode>>) {
     let mut command = String::new();
     print!("Enter command: ");
     let _ = stdout().flush();
@@ -63,54 +61,66 @@ fn prompt_loop(node: BlockchainNode) {
     if let Some('\r') = command.chars().next_back() {
         command.pop();
     }
-    execute_command(command, node.clone());
+    execute_command(command, node);
 }
 
-fn execute_command(raw_command: String, node: BlockchainNode) {
+fn execute_command(raw_command: String, node: Arc<Mutex<BlockchainNode>>) {
     let parsed_command = raw_command.split(" ").collect::<Vec<&str>>();
     match parsed_command[0] {
         "add_grade" => {
             let student_name = parsed_command[1].to_string();
             match parsed_command[2].parse() {
                 Ok(grade) => {
-                    println!(
+                    log(format!(
                         "Received add_grade command with params: {:?} {:?}",
                         student_name, grade
-                    );
-                    node.add_grade(student_name, grade);
+                    ));
+                    match node.lock() {
+                        Ok(node) => { node.add_grade(student_name, grade) }
+                        Err(error) => { panic!(error.to_string()) }
+                    }
                 }
                 Err(_error) => {
-                    println!("Invalid grade number for add_grade command");
+                    log(format!("Invalid grade number for add_grade command"));
                 }
             };
         }
         "print" => {
-            println!("Received print command");
-            node.print();
+            log(format!("Received print command"));
+            match node.lock() {
+                Ok(node) => { node.print() }
+                Err(error) => { panic!(error.to_string()) }
+            }
         }
         "quit" => {
-            println!("Received quit command");
+            log(format!("Received quit command"));
             exit(0);
         }
         "ping" => {
-            println!("Received ping command");
-            node.ping_neighbors();
+            log(format!("Received ping command"));
+            match node.lock() {
+                Ok(node) => { node.ping_neighbors() }
+                Err(error) => { panic!(error.to_string()) }
+            }
         }
         "make_coordinator" => {
-            println!("Received make_coordinator command");
-            node.make_coordinator();
+            log(format!("Received make_coordinator command"));
+            match node.lock() {
+                Ok(node) => { node.make_coordinator() }
+                Err(error) => { panic!(error.to_string()) }
+            }
         }
 
         "begin_election" => {
-            println!("Received begin_election command");
-            node.begin_election();
+            log(format!("Received begin_election command"));
+            BlockchainNode::begin_election(node);
         }
 
         "clear" => {
             print!("{esc}[2J{esc}[1;1H", esc = 27 as char);
         }
         _ => {
-            println!("Ups! Didn't understand that. Available commands: add_grade, print, quit, ping, make_coordinator");
+            log(format!("Ups! Didn't understand that. Available commands: add_grade, print, quit, ping, make_coordinator, begin_election, clear"));
         }
     }
 }

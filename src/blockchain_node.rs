@@ -1,14 +1,16 @@
-use crate::blockchain::Blockchain;
-use crate::election_message::ElectionMessage;
-use crate::ip_parser;
-
-use crate::acquire_message::AcquireMessage;
+use std::{thread, u8, usize};
+use std::alloc::System;
 use std::collections::VecDeque;
 use std::mem::size_of;
 use std::net::UdpSocket;
-use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
-use std::{thread, u8, usize};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use crate::acquire_message::AcquireMessage;
+use crate::blockchain::Blockchain;
+use crate::election_message::ElectionMessage;
+use crate::ip_parser;
+use crate::logger::log;
 
 struct DistMutex {
     coordinator_addr: String,
@@ -66,15 +68,15 @@ impl DistMutex {
             return;
         }
         // Lock not taken
-        println!(
+        log(format!(
             "Sending ACQUIRE to coordinator: {:?}",
             self.coordinator_addr
-        );
+        ));
         self.socket_to_coordinator
             .send_to("ACQUIRE".as_bytes(), &self.coordinator_addr)
             .unwrap();
 
-        println!("Waiting for OK_ACQUIRE message");
+        log(format!("Waiting for OK_ACQUIRE message"));
         const OK_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
         let got_acquire_confirmation = self.got_acquire_confirmation.1.wait_timeout_while(
             self.got_acquire_confirmation.0.lock().unwrap(),
@@ -82,10 +84,10 @@ impl DistMutex {
             |dont_got_it| !*dont_got_it,
         );
         if !*got_acquire_confirmation.unwrap().0 {
-            println!("Timeout waiting for OK_ACQUIRE message");
+            log(format!("Timeout waiting for OK_ACQUIRE message"));
             // TODO: retornar error, disparar leader_election y reintentar
         } else {
-            println!("Got OK_ACQUIRE message");
+            log(format!("Got OK_ACQUIRE message"));
             *self.lock_taken.lock().unwrap() = true;
         }
     }
@@ -94,10 +96,10 @@ impl DistMutex {
         if self.is_coordinator((*self.self_addr).to_string()) {
             if *self.lock_taken.lock().unwrap() {
                 if *self.lock_owner_addr.lock().unwrap() == *self.self_addr {
-                    println!(
+                    log(format!(
                         "Sending RELEASE to coordinator with addr: {:?}",
                         self.coordinator_addr
-                    );
+                    ));
                     self.socket_to_coordinator
                         .send_to(
                             "RELEASE".as_bytes(),
@@ -151,7 +153,7 @@ impl BlockchainNode {
     pub(crate) fn new(port: usize, neighbor_addresses: Vec<String>) -> BlockchainNode {
         let self_addr = ip_parser::local_address_with_port(&port.to_string());
         let cloned_self_addr = self_addr.clone();
-        println!("Node address for neighbor messages: {:?}", self_addr);
+        log(format!("Node address for neighbor messages: {:?}", self_addr));
         let socket = match UdpSocket::bind(self_addr) {
             Ok(socket) => socket,
             Err(_error) => {
@@ -176,7 +178,7 @@ impl BlockchainNode {
             cloned_socket,
         );
 
-        let new_node = BlockchainNode {
+        BlockchainNode {
             port,
             socket,
             leader_port: Arc::new((Mutex::new(Some(port)), Condvar::new())),
@@ -185,72 +187,62 @@ impl BlockchainNode {
             got_ok: Arc::new((Mutex::new(false), Condvar::new())),
             is_in_election: Arc::new((Mutex::new(false), Condvar::new())),
             dist_mutex,
-        };
-
-        println!("Starting to listen on port: {:?}", port);
-        let mut clone = new_node.clone();
-        thread::spawn(move || clone.listen());
-
-        new_node.begin_election();
-        // println!(
-        //     "Starting to ping all neighbors: {:?}",
-        //     new_node.neighbor_addresses
-        // );
-        // new_node.clone().ping_neighbors();
-
-        new_node
-    }
-
-    pub fn clone(&self) -> BlockchainNode {
-        BlockchainNode {
-            port: self.port,
-            socket: self.socket.try_clone().unwrap(),
-            leader_port: self.leader_port.clone(),
-            neighbor_addresses: self.neighbor_addresses.clone(),
-            blockchain: self.blockchain.clone(),
-            got_ok: self.got_ok.clone(),
-            is_in_election: self.is_in_election.clone(),
-            dist_mutex: self.dist_mutex.clone(),
         }
     }
 
-    pub fn handle_incoming_message(&mut self, message: &str, sender: &str) -> () {
+    pub fn handle_incoming_message(arc_mutex_self: Arc<Mutex<BlockchainNode>>, message: &str, sender: &str) -> () {
+        let cloned_arc_mutex_self = arc_mutex_self.clone();
         match ElectionMessage::from_bytes(message.as_bytes()) {
-            Some(election_message) => self.process_election_message(election_message, sender),
-            None => self.process_dist_mutex_message(message, sender),
+            Some(election_message) => BlockchainNode::process_election_message(cloned_arc_mutex_self, election_message, sender),
+            None => {
+                match arc_mutex_self.lock() {
+                    Ok(mut _self) => {
+                        _self.process_dist_mutex_message(message, sender)
+                    }
+                    Err(error) => { panic!(error.to_string()) }
+                }
+            }
         }
     }
 
-    fn process_election_message(&self, election_message: ElectionMessage, sender: &str) -> () {
+    fn process_election_message(arc_mutex_self: Arc<Mutex<BlockchainNode>>, election_message: ElectionMessage, sender: &str) -> () {
         match election_message {
             ElectionMessage::Election => {
-                println!(
+                let (self_port, socket) = {
+                    let _self = arc_mutex_self.lock().unwrap();
+                    (_self.port, _self.socket.try_clone().unwrap())
+                };
+                log(format!(
                     "Quieren hacer elecciones desde {:?} y yo soy {:?}!",
-                    sender, self.port
-                );
+                    sender, self_port
+                ));
                 if let Some(port) = ip_parser::get_port_from_dir(sender) {
-                    if self.port > port {
+                    if self_port > port {
                         let message_to_send = ElectionMessage::OkElection.as_bytes();
-                        self.socket.send_to(&message_to_send, sender).unwrap();
-                        let me = self.clone();
-                        thread::spawn(move || me.begin_election());
+                        socket.send_to(&message_to_send, sender).unwrap();
+                        let __self = arc_mutex_self.clone();
+                        thread::spawn(move || {
+                            BlockchainNode::begin_election(__self);
+                        });
                     }
                 }
             }
             ElectionMessage::Coordinator => {
-                *self.leader_port.0.lock().unwrap() =
+                let _self = arc_mutex_self.lock().unwrap();
+                *_self.leader_port.0.lock().unwrap() =
                     Some(ip_parser::get_port_from_dir(sender).unwrap());
-                *self.is_in_election.0.lock().unwrap() = false;
-                self.is_in_election.1.notify_all();
-                println!(
+                *_self.is_in_election.0.lock().unwrap() = false;
+                _self.is_in_election.1.notify_all();
+                log(format!(
                     "Mi nuevo coordinador es {:?}",
-                    *self.leader_port.0.lock().unwrap()
-                );
+                    *_self.leader_port.0.lock().unwrap()
+                ));
             }
             ElectionMessage::OkElection => {
-                println!("Recibi OkElection. No seré el coordinador.");
-                *self.got_ok.0.lock().unwrap() = true;
-                self.got_ok.1.notify_all();
+                log(format!("Recibi OkElection. No seré el coordinador."));
+                let _self = arc_mutex_self.lock().unwrap();
+                *_self.got_ok.0.lock().unwrap() = true;
+                _self.got_ok.1.notify_all();
             }
         }
     }
@@ -272,12 +264,11 @@ impl BlockchainNode {
     }
 
     fn process_acquire_message(&mut self, sender: &str) {
-        println!("Processing ACQUIRE message");
+        log(format!("Processing ACQUIRE message"));
         if self
             .dist_mutex
             .is_coordinator(ip_parser::local_address_with_port(&self.port.to_string()))
         {
-            // Soy el coordinador
             if self.dist_mutex.is_taken() {
                 self.dist_mutex.enqueue_requestor(sender.to_string());
             } else {
@@ -299,14 +290,16 @@ impl BlockchainNode {
                 self.dist_mutex.set_lock_owner_addr(String::new());
                 self.dist_mutex.set_taken(false);
                 if !*got_release_confirmation.unwrap().0 {
-                    println!("Timeout waiting for RELEASE message");
+                    log(format!("Timeout waiting for RELEASE message"));
                     let enqueded_requestor = self.dist_mutex.deque_requestor();
                     self.process_acquire_message(enqueded_requestor.unwrap().as_str());
                 } else {
-                    println!("Successfully received RELEASE message");
+                    log(format!("Successfully received RELEASE message"));
                     *self.dist_mutex.got_release_confirmation.0.lock().unwrap() = false;
                 }
             }
+        } else {
+            log(format!("Non-coordinator received ACQUIRE message"))
         }
     }
 
@@ -322,7 +315,7 @@ impl BlockchainNode {
     }
 
     fn process_release_message(&mut self, sender: &str) {
-        println!("Processing RELEASE message");
+        log(format!("Processing RELEASE message"));
         if self
             .dist_mutex
             .is_coordinator(ip_parser::local_address_with_port(&self.port.to_string()))
@@ -336,26 +329,33 @@ impl BlockchainNode {
                 self.dist_mutex.got_release_confirmation.1.notify_all();
                 while !self.dist_mutex.pending_locks.is_empty() {
                     let enqueded_requestor = self.dist_mutex.deque_requestor();
-                    println!(
+                    log(format!(
                         "Dequeued pending requestor with addr: {:?}",
                         enqueded_requestor
-                    );
+                    ));
                     self.process_acquire_message(enqueded_requestor.unwrap().as_str());
                 }
             }
         }
     }
 
-    pub fn listen(&mut self) {
+    pub fn listen(arc_mutex_self: Arc<Mutex<BlockchainNode>>) {
+        let port = {
+            arc_mutex_self.lock().unwrap().port
+        };
+        log(format!("Starting to listen on port: {:?}", port));
         loop {
             let mut buf = [0; size_of::<usize>() + 1];
-            match self.socket.recv_from(&mut buf) {
+            let socket = {
+                arc_mutex_self.lock().unwrap().socket.try_clone()
+            };
+            match socket.unwrap().recv_from(&mut buf) {
                 Ok((size, from)) => {
-                    println!("Received bytes {:?} from neighbor: {:?}", size, from);
+                    log(format!("Received bytes {:?} from neighbor: {:?}", size, from));
                     let received = Vec::from(&buf[0..size]);
                     let str_received = String::from_utf8(received).unwrap();
                     let neighbor = from.to_string();
-                    self.handle_incoming_message(&str_received, &neighbor);
+                    BlockchainNode::handle_incoming_message(arc_mutex_self.clone(), &str_received, &neighbor);
                 }
                 Err(error) => print!("Error while listening on port: {:?}", error),
             }
@@ -363,24 +363,18 @@ impl BlockchainNode {
     }
 
     pub fn ping_neighbors(&self) {
-        let mut neighbor_handles = vec![];
         for neighbor_addr in self.neighbor_addresses.iter() {
-            let addr = neighbor_addr.clone();
-            let me = self.clone();
-            neighbor_handles.push(thread::spawn(move || me.ping_neighbor(addr)));
+            self.ping_neighbor(neighbor_addr.clone());
         }
-        neighbor_handles.into_iter().for_each(|h| {
-            h.join();
-        });
     }
 
     pub fn ping_neighbor(&self, dest_addr: String) {
-        println!("Sending ping to neighbor with addr: {:?}", dest_addr);
+        log(format!("Sending ping to neighbor with addr: {:?}", dest_addr));
         self.socket.send_to("PING".as_bytes(), dest_addr).unwrap();
     }
 
     pub fn make_coordinator(&self) {
-        println!("Node received make_coordinator");
+        log(format!("Node received make_coordinator"));
         match (*self).leader_port.0.lock() {
             Ok(mut leader_port) => {
                 *leader_port = Option::from((*self).port);
@@ -389,16 +383,16 @@ impl BlockchainNode {
                 panic!("{}", error.to_string())
             }
         }
-        println!("New coordinator: {:?}", self.leader_port);
+        log(format!("New coordinator: {:?}", self.leader_port));
     }
 
     pub fn add_grade(&self, _name: String, _note: f64) {
-        println!("Node received add_grade");
+        log(format!("Node received add_grade"));
         // TODO
     }
 
     pub fn print(&self) {
-        println!("Print current blockchain");
+        log(format!("Print current blockchain"));
         if self.blockchain.is_valid() {
             // self.blockchain.print();
         }
@@ -406,44 +400,60 @@ impl BlockchainNode {
 
     /// Comienza el proceso de eleccion de lider.
     /// Al finalizar, el nodo con número de puerto mas grande es quien queda como coordinador.
-    pub fn begin_election(&self) {
-        if *self.is_in_election.0.lock().unwrap() {
-            return;
-        }
-
-        *self.got_ok.0.lock().unwrap() = false;
-        *self.is_in_election.0.lock().unwrap() = true;
-
-        for neighbor in &self.neighbor_addresses {
-            match ip_parser::get_port_from_dir(neighbor) {
-                Some(port) => {
-                    if port < self.port {
-                        continue;
-                    }
-                    println!("\t\tSending ELECTION to {:?}", neighbor);
-                    let message_to_send = ElectionMessage::Election.as_bytes();
-                    self.socket.send_to(&message_to_send, neighbor).unwrap();
+    pub fn begin_election(arc_mutex_self: Arc<Mutex<BlockchainNode>>) {
+        match arc_mutex_self.lock() {
+            Ok(_self) => {
+                if *_self.is_in_election.0.lock().unwrap() {
+                    return;
                 }
 
-                None => {
-                    panic!("There is an intruder!")
+                *_self.got_ok.0.lock().unwrap() = false;
+                *_self.is_in_election.0.lock().unwrap() = true;
+
+                for neighbor in &_self.neighbor_addresses {
+                    match ip_parser::get_port_from_dir(neighbor) {
+                        Some(port) => {
+                            if port < _self.port {
+                                continue;
+                            }
+                            log(format!("\t\tSending ELECTION to {:?}", neighbor));
+                            let message_to_send = ElectionMessage::Election.as_bytes();
+                            _self.socket.send_to(&message_to_send, neighbor).unwrap();
+                        }
+
+                        None => {
+                            panic!("There is an intruder!")
+                        }
+                    }
                 }
             }
+            Err(error) => { panic!(error.to_string()) }
         }
-        println!("Enviando mensaje ELECTION a vecinos. Esperando sus respuestas...");
+
+        log(format!("Enviando mensaje ELECTION a vecinos. Esperando sus respuestas..."));
         const TIMEOUT: Duration = Duration::from_secs(3);
+        let _got_ok = {
+            arc_mutex_self.lock().unwrap().got_ok.clone()
+        };
         let got_ok =
-            self.got_ok
+            _got_ok
                 .1
-                .wait_timeout_while(self.got_ok.0.lock().unwrap(), TIMEOUT, |got_it| !*got_it);
+                .wait_timeout_while(_got_ok.0.lock().unwrap(), TIMEOUT, |got_it| !*got_it);
         if !*got_ok.unwrap().0 {
-            self.make_leader();
-            *self.is_in_election.0.lock().unwrap() = false;
+            match arc_mutex_self.lock() {
+                Ok(_self) => {
+                    _self.make_leader();
+                    *_self.is_in_election.0.lock().unwrap() = false;
+                }
+                Err(error) => { panic!(error.to_string()) }
+            }
         } else {
-            let _ = self
-                .is_in_election
+            let _is_in_election = {
+                arc_mutex_self.lock().unwrap().is_in_election.clone()
+            };
+            let _ = _is_in_election
                 .1
-                .wait_while(self.is_in_election.0.lock().unwrap(), |is_in_election| {
+                .wait_while(_is_in_election.0.lock().unwrap(), |is_in_election| {
                     *is_in_election
                 });
         }
@@ -451,12 +461,13 @@ impl BlockchainNode {
 
     fn make_leader(&self) {
         *self.leader_port.0.lock().unwrap() = Some(self.port);
-        println!(
+        log(format!("{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis().to_string()));
+        log(format!(
             "Soy el nuevo coordinador! Puerto {:?}",
             *self.leader_port.0.lock().unwrap()
-        );
+        ));
         for neighbor in &self.neighbor_addresses {
-            println!("\t\tEnviando mensaje COORDINATOR a {:?}", neighbor);
+            log(format!("\t\tEnviando mensaje COORDINATOR a {:?}", neighbor));
             let message_to_send = ElectionMessage::Coordinator.as_bytes();
             self.socket.send_to(&message_to_send, neighbor).unwrap();
         }

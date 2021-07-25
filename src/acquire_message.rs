@@ -1,9 +1,9 @@
 ///
 /// |     Tipo      |  Representacion Binaria   |
 /// |---------------|------------------------   |
-/// |   Acquire    |            b'ACQUI'           |
-/// |   OkAcquire  |            b'OKACQ'         |
-/// |   Release   |            b'RELEA'           |
+/// |   Acquire     |            b'ACQUI'       |
+/// |   OkAcquire   |            b'OKACQ'       |
+/// |   Release     |            b'RELEA'       |
 #[derive(PartialEq, Debug)]
 pub enum AcquireMessage {
     Acquire,
