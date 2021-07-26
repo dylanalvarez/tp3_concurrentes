@@ -7,10 +7,12 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::acquire_message::AcquireMessage;
-use crate::blockchain::Blockchain;
+use crate::blockchain::{Blockchain, BlockchainRecord};
 use crate::election_message::ElectionMessage;
 use crate::ip_parser;
 use crate::logger::log;
+use std::borrow::Borrow;
+use crate::add_grade_message::AddGradeMessage;
 
 struct DistMutex {
     coordinator_addr: String,
@@ -49,68 +51,57 @@ impl DistMutex {
         new_dist_mutex
     }
 
-    fn clone(&self) -> DistMutex {
-        DistMutex {
-            coordinator_addr: self.coordinator_addr.clone(),
-            self_addr: self.self_addr.clone(),
-            socket_to_coordinator: self.socket_to_coordinator.try_clone().unwrap(),
-            lock_taken: self.lock_taken.clone(),
-            lock_owner_addr: self.lock_owner_addr.clone(),
-            got_acquire_confirmation: self.got_acquire_confirmation.clone(),
-            got_release_confirmation: self.got_release_confirmation.clone(),
-            pending_locks: self.pending_locks.clone(),
-        }
-    }
-
-    fn acquire(&mut self) {
-        if *self.lock_taken.lock().unwrap() {
-            // Lock already taken
-            return;
+    fn acquire(blockchain_node: Arc<Mutex<BlockchainNode>>) {
+        match *blockchain_node.lock().unwrap().dist_mutex.lock_taken.lock().unwrap() {
+            true => { return }
+            false => {}
         }
         // Lock not taken
-        log(format!(
-            "Sending ACQUIRE to coordinator: {:?}",
-            self.coordinator_addr
-        ));
-        self.socket_to_coordinator
-            .send_to("ACQUIRE".as_bytes(), &self.coordinator_addr)
-            .unwrap();
+        {
+            let node = blockchain_node.lock().unwrap();
+            log(format!(
+                "Sending ACQUIRE to coordinator: {:?}",
+                node.dist_mutex.coordinator_addr
+            ));
+            node.dist_mutex.socket_to_coordinator
+                .send_to(&AcquireMessage::Acquire.as_bytes(), &node.dist_mutex.coordinator_addr)
+                .unwrap();
 
-        log(format!("Waiting for OK_ACQUIRE message"));
+            log(format!("Waiting for OK_ACQUIRE message"));
+        }
         const OK_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
-        let got_acquire_confirmation = self.got_acquire_confirmation.1.wait_timeout_while(
-            self.got_acquire_confirmation.0.lock().unwrap(),
+
+        let _got_acquire_confirmation = {
+            blockchain_node.lock().unwrap().dist_mutex.got_acquire_confirmation.clone()
+        };
+
+        let got_acquire_confirmation = _got_acquire_confirmation.1.wait_timeout_while(
+            _got_acquire_confirmation.0.lock().unwrap(),
             OK_ACQUIRE_TIMEOUT,
             |dont_got_it| !*dont_got_it,
         );
-        if !*got_acquire_confirmation.unwrap().0 {
+        if *got_acquire_confirmation.unwrap().0 {
+            log(format!("Got OK_ACQUIRE message"));
+            let node = blockchain_node.lock().unwrap();
+            *node.dist_mutex.lock_taken.lock().unwrap() = true;
+            *node.dist_mutex.got_acquire_confirmation.0.lock().unwrap() = false;
+        } else {
             log(format!("Timeout waiting for OK_ACQUIRE message"));
             // TODO: retornar error, disparar leader_election y reintentar
-        } else {
-            log(format!("Got OK_ACQUIRE message"));
-            *self.lock_taken.lock().unwrap() = true;
         }
     }
 
     fn release(&mut self) {
-        if self.is_coordinator((*self.self_addr).to_string()) {
-            if *self.lock_taken.lock().unwrap() {
-                if *self.lock_owner_addr.lock().unwrap() == *self.self_addr {
-                    log(format!(
-                        "Sending RELEASE to coordinator with addr: {:?}",
-                        self.coordinator_addr
-                    ));
-                    self.socket_to_coordinator
-                        .send_to(
-                            "RELEASE".as_bytes(),
-                            ip_parser::local_address_with_port(&self.coordinator_addr),
-                        )
-                        .unwrap();
-                    *self.lock_taken.lock().unwrap() = false;
-                    *self.got_acquire_confirmation.0.lock().unwrap() = false;
-                }
-            }
-        }
+        log(format!(
+            "Sending RELEASE to coordinator with addr: {:?}",
+            self.coordinator_addr
+        ));
+        self.socket_to_coordinator
+            .send_to(
+                &AcquireMessage::Release.as_bytes(),
+                &self.coordinator_addr,
+            )
+            .unwrap();
     }
 
     fn is_coordinator(&self, addr: String) -> bool {
@@ -171,7 +162,7 @@ impl BlockchainNode {
                 )
             }
         };
-        // TODO: por ahora se pone al propio puerto como coordinador, luego se actualizara con la election
+
         let dist_mutex = DistMutex::new(
             cloned_self_addr,
             ip_parser::local_address_with_port(&port.to_string()),
@@ -192,15 +183,26 @@ impl BlockchainNode {
 
     pub fn handle_incoming_message(arc_mutex_self: Arc<Mutex<BlockchainNode>>, message: &str, sender: &str) -> () {
         let cloned_arc_mutex_self = arc_mutex_self.clone();
-        match ElectionMessage::from_bytes(message.as_bytes()) {
-            Some(election_message) => BlockchainNode::process_election_message(cloned_arc_mutex_self, election_message, sender),
-            None => {
-                match arc_mutex_self.lock() {
-                    Ok(mut _self) => {
-                        _self.process_dist_mutex_message(message, sender)
-                    }
-                    Err(error) => { panic!(error.to_string()) }
-                }
+        if let Some(election_message) = ElectionMessage::from_bytes(message.as_bytes()) {
+            return BlockchainNode::process_election_message(cloned_arc_mutex_self, election_message, sender)
+        }
+        if let Some(acquire_message) = AcquireMessage::from_bytes(message.as_bytes()) {
+            BlockchainNode::process_dist_mutex_message(arc_mutex_self, acquire_message, sender);
+            return
+        }
+        if let Some(add_grade_message) = AddGradeMessage::from_string(String::from(message)) {
+            return BlockchainNode::process_add_grade_message(add_grade_message, sender)
+        }
+        panic!("Unknown message: {}", message)
+    }
+
+    fn process_add_grade_message(add_grade_message: AddGradeMessage, sender: &str) -> () {
+        match add_grade_message {
+            AddGradeMessage::FromCoordinator(blockchain_record) => {
+                log(format!("received add grade message from coordinator: {} {} {}", blockchain_record.student_name, blockchain_record.grade, blockchain_record.hash))
+            }
+            AddGradeMessage::ToCoordinator(student_name, grade) => {
+                log(format!("received add grade message to coordinator: {} {}", student_name, grade))
             }
         }
     }
@@ -228,11 +230,12 @@ impl BlockchainNode {
                 }
             }
             ElectionMessage::Coordinator => {
-                let _self = arc_mutex_self.lock().unwrap();
+                let mut _self = arc_mutex_self.lock().unwrap();
                 *_self.leader_port.0.lock().unwrap() =
                     Some(ip_parser::get_port_from_dir(sender).unwrap());
                 *_self.is_in_election.0.lock().unwrap() = false;
                 _self.is_in_election.1.notify_all();
+                _self.dist_mutex.coordinator_addr = sender.to_string();
                 log(format!(
                     "Mi nuevo coordinador es {:?}",
                     *_self.leader_port.0.lock().unwrap()
@@ -247,55 +250,75 @@ impl BlockchainNode {
         }
     }
 
-    fn process_dist_mutex_message(&mut self, message: &str, sender: &str) -> () {
-        let acquire_message = AcquireMessage::from_bytes(message.as_bytes());
-        match acquire_message {
-            Some(AcquireMessage::Acquire) => {
-                self.process_acquire_message(sender);
+    fn process_dist_mutex_message(arc_mutex_self: Arc<Mutex<BlockchainNode>>, message: AcquireMessage, sender: &str) -> () {
+        match message {
+            AcquireMessage::Acquire => {
+                BlockchainNode::process_acquire_message(arc_mutex_self, sender);
             }
-            Some(AcquireMessage::OkAcquire) => {
-                self.process_ok_acquire_message(sender);
+            AcquireMessage::OkAcquire => {
+                BlockchainNode::process_ok_acquire_message(arc_mutex_self, sender);
             }
-            Some(AcquireMessage::Release) => {
-                self.process_release_message(sender);
+            AcquireMessage::Release => {
+                BlockchainNode::process_release_message(arc_mutex_self, sender);
             }
-            None => {}
         }
     }
 
-    fn process_acquire_message(&mut self, sender: &str) {
+    fn process_acquire_message(arc_mutex_self: Arc<Mutex<BlockchainNode>>, sender: &str) {
         log(format!("Processing ACQUIRE message"));
-        if self
-            .dist_mutex
-            .is_coordinator(ip_parser::local_address_with_port(&self.port.to_string()))
+        let (is_coordinator, is_taken, socket) = {
+            let _self = arc_mutex_self.lock().unwrap();
+            (
+                _self.dist_mutex.is_coordinator(ip_parser::local_address_with_port(&_self.port.to_string())),
+                _self.dist_mutex.is_taken(),
+                _self.socket.try_clone()
+            )
+        };
+
+        if is_coordinator
         {
-            if self.dist_mutex.is_taken() {
-                self.dist_mutex.enqueue_requestor(sender.to_string());
+            if is_taken {
+                arc_mutex_self.lock().unwrap().dist_mutex.enqueue_requestor(sender.to_string());
             } else {
-                self.dist_mutex.set_taken(true);
-                self.dist_mutex.set_lock_owner_addr(sender.to_string());
+                {
+                    let _self = arc_mutex_self.lock().unwrap();
+                    _self.dist_mutex.set_taken(true);
+                    _self.dist_mutex.set_lock_owner_addr(sender.to_string());
+                }
                 let ok_acquire_message = AcquireMessage::OkAcquire.as_bytes();
-                self.socket.send_to(&ok_acquire_message, sender).unwrap();
+                socket.unwrap().send_to(&ok_acquire_message, sender).unwrap();
+                log(String::from("Sent OK_ACQUIRE"));
 
                 const OK_RELEASE_TIMEOUT: Duration = Duration::from_secs(10);
-                let got_release_confirmation = self
-                    .dist_mutex
-                    .got_release_confirmation
+                let _got_release_confirmation = {
+                    arc_mutex_self.lock().unwrap().dist_mutex.got_release_confirmation.clone()
+                };
+                let got_release_confirmation = _got_release_confirmation
                     .1
                     .wait_timeout_while(
-                        self.dist_mutex.got_release_confirmation.0.lock().unwrap(),
+                        _got_release_confirmation.0.lock().unwrap(),
                         OK_RELEASE_TIMEOUT,
                         |dont_got_it| !*dont_got_it,
                     );
-                self.dist_mutex.set_lock_owner_addr(String::new());
-                self.dist_mutex.set_taken(false);
+                {
+                    let _self = arc_mutex_self.lock().unwrap();
+                    _self.dist_mutex.set_lock_owner_addr(String::new());
+                    _self.dist_mutex.set_taken(false);
+                }
                 if !*got_release_confirmation.unwrap().0 {
                     log(format!("Timeout waiting for RELEASE message"));
-                    let enqueded_requestor = self.dist_mutex.deque_requestor();
-                    self.process_acquire_message(enqueded_requestor.unwrap().as_str());
+                    let requestor = {
+                        arc_mutex_self.lock().unwrap().dist_mutex.deque_requestor()
+                    };
+                    match requestor {
+                        None => {}
+                        Some(requestor) => {
+                            BlockchainNode::process_acquire_message(arc_mutex_self, requestor.as_str());
+                        }
+                    }
                 } else {
                     log(format!("Successfully received RELEASE message"));
-                    *self.dist_mutex.got_release_confirmation.0.lock().unwrap() = false;
+                    *arc_mutex_self.lock().unwrap().dist_mutex.got_release_confirmation.0.lock().unwrap() = false;
                 }
             }
         } else {
@@ -303,39 +326,44 @@ impl BlockchainNode {
         }
     }
 
-    fn process_ok_acquire_message(&mut self, sender: &str) {
-        if !self
-            .dist_mutex
-            .is_coordinator(ip_parser::local_address_with_port(&self.port.to_string()))
-        {
-            // No soy el coordinador
-            *self.dist_mutex.got_acquire_confirmation.0.lock().unwrap() = true;
-            self.dist_mutex.got_acquire_confirmation.1.notify_all();
-        }
+    fn process_ok_acquire_message(arc_mutex_self: Arc<Mutex<BlockchainNode>>, sender: &str) {
+        let _self = arc_mutex_self.lock().unwrap();
+        *_self.dist_mutex.got_acquire_confirmation.0.lock().unwrap() = true;
+        _self.dist_mutex.got_acquire_confirmation.1.notify_all();
     }
 
-    fn process_release_message(&mut self, sender: &str) {
+    fn process_release_message(arc_mutex_self: Arc<Mutex<BlockchainNode>>, sender: &str) {
         log(format!("Processing RELEASE message"));
-        if self
-            .dist_mutex
-            .is_coordinator(ip_parser::local_address_with_port(&self.port.to_string()))
-        {
-            // Soy el coordinador
-            if self.dist_mutex.is_taken() {
-                // TODO: enviar NUEVA_NOTA a todos?
-                self.dist_mutex.set_taken(false);
-                self.dist_mutex.set_lock_owner_addr(String::new());
-                *self.dist_mutex.got_release_confirmation.0.lock().unwrap() = true;
-                self.dist_mutex.got_release_confirmation.1.notify_all();
-                while !self.dist_mutex.pending_locks.is_empty() {
-                    let enqueded_requestor = self.dist_mutex.deque_requestor();
-                    log(format!(
-                        "Dequeued pending requestor with addr: {:?}",
-                        enqueded_requestor
-                    ));
-                    self.process_acquire_message(enqueded_requestor.unwrap().as_str());
+
+        match arc_mutex_self.lock() {
+            Ok(_self) => {
+                if !_self.dist_mutex.is_coordinator(
+                    ip_parser::local_address_with_port(&_self.port.to_string())
+                ) { return }
+
+                if !_self.dist_mutex.is_taken() { return }
+
+                _self.dist_mutex.set_taken(false);
+                _self.dist_mutex.set_lock_owner_addr(String::new());
+                {
+                    *_self.dist_mutex.got_release_confirmation.0.lock().unwrap() = true;
                 }
+                _self.dist_mutex.got_release_confirmation.1.notify_all();
             }
+            Err(error) => {panic!(error.to_string())}
+        }
+
+        loop {
+            let enqueded_requestor = {
+                let mut _self = arc_mutex_self.lock().unwrap();
+                if _self.dist_mutex.pending_locks.is_empty() { break }
+                _self.dist_mutex.deque_requestor()
+            };
+            log(format!(
+                "Dequeued pending requestor with addr: {:?}",
+                enqueded_requestor
+            ));
+            BlockchainNode::process_acquire_message(arc_mutex_self.clone(), enqueded_requestor.unwrap().as_str());
         }
     }
 
@@ -345,17 +373,20 @@ impl BlockchainNode {
         };
         log(format!("Starting to listen on port: {:?}", port));
         loop {
-            let mut buf = [0; size_of::<usize>() + 1];
+            let mut buf = [0; 1000];
             let socket = {
                 arc_mutex_self.lock().unwrap().socket.try_clone()
             };
             match socket.unwrap().recv_from(&mut buf) {
                 Ok((size, from)) => {
-                    log(format!("Received bytes {:?} from neighbor: {:?}", size, from));
                     let received = Vec::from(&buf[0..size]);
                     let str_received = String::from_utf8(received).unwrap();
+                    log(format!("Received bytes {:?} from neighbor: {:?}: {}", size, from, str_received));
                     let neighbor = from.to_string();
-                    BlockchainNode::handle_incoming_message(arc_mutex_self.clone(), &str_received, &neighbor);
+                    let clone = arc_mutex_self.clone();
+                    thread::spawn(move || {
+                        BlockchainNode::handle_incoming_message(clone, &str_received, &neighbor);
+                    });
                 }
                 Err(error) => print!("Error while listening on port: {:?}", error),
             }
@@ -386,9 +417,19 @@ impl BlockchainNode {
         log(format!("New coordinator: {:?}", self.leader_port));
     }
 
-    pub fn add_grade(&self, _name: String, _note: f64) {
+    pub fn add_grade(arc_mutex_self: Arc<Mutex<BlockchainNode>>, _name: String, _note: f64) {
         log(format!("Node received add_grade"));
-        // TODO
+        DistMutex::acquire(arc_mutex_self.clone());
+        {
+            log(String::from("antes de enviar el TO COORDINATOR"));
+            let _self = arc_mutex_self.lock().unwrap();
+            _self.socket.send_to(
+                AddGradeMessage::ToCoordinator(_name, _note).as_string().as_bytes(),
+                _self.dist_mutex.coordinator_addr.clone()
+            );
+            log(String::from("despues de enviar el TO COORDINATOR"));
+        }
+        { arc_mutex_self.lock().unwrap().dist_mutex.release() }
     }
 
     pub fn print(&self) {

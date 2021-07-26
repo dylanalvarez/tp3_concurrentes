@@ -1,11 +1,11 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct BlockchainRecord {
-    student_name: String,
-    grade: f64,
-    hash: u64,
+    pub student_name: String,
+    pub grade: f64,
+    pub hash: u64,
 }
 
 pub struct Blockchain {

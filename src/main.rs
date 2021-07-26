@@ -13,6 +13,7 @@ mod blockchain_node;
 mod election_message;
 mod ip_parser;
 mod logger;
+mod add_grade_message;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -68,6 +69,10 @@ fn execute_command(raw_command: String, node: Arc<Mutex<BlockchainNode>>) {
     let parsed_command = raw_command.split(" ").collect::<Vec<&str>>();
     match parsed_command[0] {
         "add_grade" => {
+            if parsed_command.len() != 3 {
+                println!("Invalid command. add_grade <student name (without spaces)> <student grade (with dot notation. eg: 9.54)>");
+                return
+            }
             let student_name = parsed_command[1].to_string();
             match parsed_command[2].parse() {
                 Ok(grade) => {
@@ -75,10 +80,7 @@ fn execute_command(raw_command: String, node: Arc<Mutex<BlockchainNode>>) {
                         "Received add_grade command with params: {:?} {:?}",
                         student_name, grade
                     ));
-                    match node.lock() {
-                        Ok(node) => { node.add_grade(student_name, grade) }
-                        Err(error) => { panic!(error.to_string()) }
-                    }
+                    BlockchainNode::add_grade(node, student_name, grade);
                 }
                 Err(_error) => {
                     log(format!("Invalid grade number for add_grade command"));
