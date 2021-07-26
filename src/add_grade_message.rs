@@ -57,7 +57,7 @@ mod tests {
         assert_eq!(*b"GRADE_FROM_COORDINATOR;asd;12.4;383838", AddGradeMessage::FromCoordinator(BlockchainRecord {
             student_name: "asd".to_string(),
             grade: 12.4,
-            hash: 383838
+            hash: 383838,
         }).as_string().as_bytes());
     }
 

@@ -1,5 +1,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::fmt::{Display, Formatter};
+use std::fmt;
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct BlockchainRecord {
@@ -29,6 +31,16 @@ fn is_valid(record: &BlockchainRecord, previous_record_hash: u64) -> bool {
     generate_hash(&record.student_name, record.grade, previous_record_hash) == record.hash
 }
 
+impl fmt::Display for Blockchain {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let mut result = String::new();
+        for record in &self.records {
+            result.push_str(format!("{} {} {}\n", record.student_name, record.grade, record.hash).as_str())
+        }
+        write!(f, "{}", result)
+    }
+}
+
 impl Blockchain {
     pub(crate) fn new() -> Blockchain {
         Blockchain {
@@ -39,6 +51,10 @@ impl Blockchain {
         Blockchain {
             records: self.records.clone(),
         }
+    }
+
+    pub fn last_record(&self) -> Option<&BlockchainRecord> {
+        self.records.last()
     }
 
     pub fn add_grade(&mut self, student_name: String, grade: f64) {

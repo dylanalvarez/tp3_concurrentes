@@ -1,5 +1,6 @@
 use std::{thread, u8, usize};
 use std::alloc::System;
+use std::borrow::Borrow;
 use std::collections::VecDeque;
 use std::mem::size_of;
 use std::net::UdpSocket;
@@ -7,12 +8,11 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::acquire_message::AcquireMessage;
+use crate::add_grade_message::AddGradeMessage;
 use crate::blockchain::{Blockchain, BlockchainRecord};
 use crate::election_message::ElectionMessage;
 use crate::ip_parser;
 use crate::logger::log;
-use std::borrow::Borrow;
-use crate::add_grade_message::AddGradeMessage;
 
 struct DistMutex {
     coordinator_addr: String,
@@ -191,18 +191,27 @@ impl BlockchainNode {
             return
         }
         if let Some(add_grade_message) = AddGradeMessage::from_string(String::from(message)) {
-            return BlockchainNode::process_add_grade_message(add_grade_message, sender)
+            return BlockchainNode::process_add_grade_message(arc_mutex_self, add_grade_message, sender)
         }
         panic!("Unknown message: {}", message)
     }
 
-    fn process_add_grade_message(add_grade_message: AddGradeMessage, sender: &str) -> () {
+    fn process_add_grade_message(arc_mutex_self: Arc<Mutex<BlockchainNode>>, add_grade_message: AddGradeMessage, sender: &str) -> () {
         match add_grade_message {
             AddGradeMessage::FromCoordinator(blockchain_record) => {
+                arc_mutex_self.lock().unwrap().blockchain.add_record(blockchain_record.clone());
                 log(format!("received add grade message from coordinator: {} {} {}", blockchain_record.student_name, blockchain_record.grade, blockchain_record.hash))
             }
             AddGradeMessage::ToCoordinator(student_name, grade) => {
-                log(format!("received add grade message to coordinator: {} {}", student_name, grade))
+                let mut _self = arc_mutex_self.lock().unwrap();
+                _self.blockchain.add_grade(student_name.clone(), grade);
+                for neighbor_addr in _self.neighbor_addresses.iter() {
+                    _self.socket.send_to(
+                        AddGradeMessage::FromCoordinator(_self.blockchain.last_record().unwrap().clone()).as_string().as_bytes(),
+                        neighbor_addr
+                    );
+                }
+                log(format!("received add grade message to coordinator: {} {}", student_name, grade));
             }
         }
     }
@@ -434,8 +443,9 @@ impl BlockchainNode {
 
     pub fn print(&self) {
         log(format!("Print current blockchain"));
-        if self.blockchain.is_valid() {
-            // self.blockchain.print();
+        println!("{}", self.blockchain);
+        if !self.blockchain.is_valid() {
+            println!("Invalid blockchain!");
         }
     }
 
