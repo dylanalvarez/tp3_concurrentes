@@ -52,7 +52,7 @@ impl DistMutex {
         new_dist_mutex
     }
 
-    fn acquire(blockchain_node: Arc<Mutex<BlockchainNode>>) {
+    fn acquire(blockchain_node: Arc<Mutex<BlockchainNode>>) -> Result<(), ()> {
         match *blockchain_node
             .lock()
             .unwrap()
@@ -61,10 +61,10 @@ impl DistMutex {
             .lock()
             .unwrap()
         {
-            true => return,
+            true => return Ok(()),
             false => {}
         }
-        // Lock not taken
+
         {
             let node = blockchain_node.lock().unwrap();
             log(format!(
@@ -102,10 +102,12 @@ impl DistMutex {
             let node = blockchain_node.lock().unwrap();
             *node.dist_mutex.lock_taken.lock().unwrap() = true;
             *node.dist_mutex.got_acquire_confirmation.0.lock().unwrap() = false;
+            Ok(())
         } else {
             log(format!("Timeout waiting for OK_ACQUIRE message"));
-            // TODO: retornar error, disparar leader_election y reintentar
+            Err(())
         }
+        // Lock not taken
     }
 
     fn release(&mut self) {
@@ -587,23 +589,43 @@ impl BlockchainNode {
         log(format!("New coordinator: {:?}", self.leader_port));
     }
 
-    pub fn add_grade(arc_mutex_self: Arc<Mutex<BlockchainNode>>, _name: String, _note: f64) {
+    pub fn add_grade(
+        arc_mutex_self: Arc<Mutex<BlockchainNode>>,
+        _name: String,
+        _note: f64,
+    ) -> Result<(), ()> {
         log(format!("Node received add_grade"));
-        DistMutex::acquire(arc_mutex_self.clone());
-        {
-            log(String::from("antes de enviar el TO COORDINATOR"));
-            let _self = arc_mutex_self.lock().unwrap();
-            _self.socket.send_to(
-                AddGradeMessage::ToCoordinator(_name, _note)
-                    .as_string()
-                    .as_bytes(),
-                _self.dist_mutex.coordinator_addr.clone(),
-            );
-            log(String::from("despues de enviar el TO COORDINATOR"));
+        let result = DistMutex::acquire(arc_mutex_self.clone());
+        match result {
+            Ok(()) => {
+                {
+                    log(String::from("antes de enviar el TO COORDINATOR"));
+                    let _self = arc_mutex_self.lock().unwrap();
+                    _self
+                        .socket
+                        .send_to(
+                            AddGradeMessage::ToCoordinator(_name, _note)
+                                .as_string()
+                                .as_bytes(),
+                            _self.dist_mutex.coordinator_addr.clone(),
+                        )
+                        .unwrap();
+                    log(String::from("despues de enviar el TO COORDINATOR"));
+                }
+                {
+                    arc_mutex_self.lock().unwrap().dist_mutex.release();
+                    Ok(())
+                }
+            }
+            Err(()) => {
+                log(String::from(
+                    "No hubo respuesta del Coordinador. Comenzando proceso de eleccion de lider.",
+                ));
+                BlockchainNode::begin_election(arc_mutex_self.clone());
+                BlockchainNode::add_grade(arc_mutex_self, _name, _note)
+            }
         }
-        {
-            arc_mutex_self.lock().unwrap().dist_mutex.release()
-        }
+        // let result_acquire = DistMutex::acquire(arc_mutex_self.clone());
     }
 
     pub fn print(&self) {
@@ -617,7 +639,7 @@ impl BlockchainNode {
     /// Comienza el proceso de eleccion de lider.
     /// Al finalizar, el nodo con número de puerto mas grande es quien queda como coordinador.
     pub fn begin_election(arc_mutex_self: Arc<Mutex<BlockchainNode>>) {
-        const CAN_BEGIN_ELECTION_TIMEOUT: Duration = Duration::from_secs(5);
+        const CAN_BEGIN_ELECTION_TIMEOUT: Duration = Duration::from_secs(1);
         let _can_begin_election = { arc_mutex_self.lock().unwrap().can_begin_election.clone() };
         log(format!("Waiting for can_begin_election condvar"));
         _can_begin_election.1.wait_timeout_while(
@@ -661,7 +683,7 @@ impl BlockchainNode {
         log(format!(
             "Enviando mensaje ELECTION a vecinos. Esperando sus respuestas..."
         ));
-        const TIMEOUT: Duration = Duration::from_secs(3);
+        const TIMEOUT: Duration = Duration::from_secs(1);
         let _got_ok = { arc_mutex_self.lock().unwrap().got_ok.clone() };
         let got_ok = _got_ok.1.wait_timeout_while(
             _got_ok.0.lock().unwrap(),
@@ -670,7 +692,7 @@ impl BlockchainNode {
         );
         if !*got_ok.unwrap().0 {
             match arc_mutex_self.lock() {
-                Ok(_self) => {
+                Ok(mut _self) => {
                     _self.make_leader();
                     *_self.is_in_election.0.lock().unwrap() = false;
                 }
@@ -688,8 +710,10 @@ impl BlockchainNode {
         }
     }
 
-    fn make_leader(&self) {
+    fn make_leader(&mut self) {
         *self.leader_port.lock().unwrap() = Some(self.port);
+        self.dist_mutex.coordinator_addr =
+            ip_parser::local_address_with_port(&self.port.to_string());
         log(format!(
             "Soy el nuevo coordinador! Puerto {:?}",
             *self.leader_port.lock().unwrap()
