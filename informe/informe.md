@@ -86,9 +86,9 @@ clear : limpia la terminal.
 
 ## Conclusiones del trabajo práctico
 
-
-
 Con la implementación del trabajo práctico pudimos aprender y llevar a concreto ciertos conceptos que desarrollamos en la segunda parte de la materia. Entre ellos:
 
 - Implementación de un algoritmo de elección de lider, como fue la implementacion del algoritmo *bully*.
 - Implementacion de algoritmo de exclusion mutua, como fue la implementacion del *mutex distribuido*, administrado por el coordinador.
+
+Adicionalmente, nos gustaria destacar que nuestra implementacion del trabajo utilizando mutexes no nos resulto cómoda. En muchas partes el código se vuelve un poco confuso por el hecho de tener que manejar estas herramientas de concurrencia. Posiblemente, el uso de otras herramientas mas sofisticadas como *channels* nos hubiera facilitado las cosas un poco, además de hacer un código un poco mas legible.
