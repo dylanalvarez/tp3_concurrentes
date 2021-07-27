@@ -3,10 +3,9 @@ pub fn local_address_with_port(port: &str) -> String {
 }
 
 pub fn get_port_from_dir(dir: &str) -> Option<usize> {
-    match dir.split(':').last() {
-        Some(port) => Some(port.parse::<usize>().unwrap()),
-        None => None,
-    }
+    dir.split(':')
+        .last()
+        .map(|port| port.parse::<usize>().unwrap())
 }
 
 #[cfg(test)]

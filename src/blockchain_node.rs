@@ -52,9 +52,10 @@ impl DistMutex {
             .lock()
             .unwrap()
         {
-            true =>  {
+            true => {
                 log("acquire: returns, lock already taken".to_string());
-                return Ok(()) },
+                return Ok(());
+            }
             false => {
                 log("acquire: lock not taken".to_string());
             }
@@ -603,7 +604,7 @@ impl BlockchainNode {
                 {
                     arc_mutex_self.lock().unwrap().dist_mutex.release();
                     let mut _self = arc_mutex_self.lock().unwrap();
-                    if _self.port !=  _self.leader_port.lock().unwrap().unwrap() {
+                    if _self.port != _self.leader_port.lock().unwrap().unwrap() {
                         *_self.dist_mutex.lock_taken.lock().unwrap() = false;
                     }
                     Ok(())

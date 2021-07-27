@@ -29,7 +29,11 @@ fn generate_hash(student_name: String, grade: f64, previous_record_hash: u64) ->
 }
 
 fn is_valid(record: &BlockchainRecord, previous_record_hash: u64) -> bool {
-    generate_hash(record.student_name.clone(), record.grade, previous_record_hash) == record.hash
+    generate_hash(
+        record.student_name.clone(),
+        record.grade,
+        previous_record_hash,
+    ) == record.hash
 }
 
 impl fmt::Display for Blockchain {
