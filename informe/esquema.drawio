@@ -1,0 +1,92 @@
+<mxfile host="65bd71144e">
+    <diagram id="MfZcZ-aokhecKIUyL5vM" name="Page-1">
+        <mxGraphModel dx="1169" dy="712" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="2" value="Solicitante" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;collapsible=0;recursiveResize=0;outlineConnect=0;" vertex="1" parent="1">
+                    <mxGeometry x="40" y="40" width="80" height="440" as="geometry"/>
+                </mxCell>
+                <mxCell id="17" value="&lt;span style=&quot;font-family: &amp;#34;droid sans mono&amp;#34; , monospace , monospace , &amp;#34;droid sans fallback&amp;#34; ; text-align: left&quot;&gt;&lt;font style=&quot;font-size: 10px&quot; color=&quot;#3333ff&quot;&gt;AcquireMessage::Release&lt;/font&gt;&lt;/span&gt;" style="html=1;verticalAlign=bottom;endArrow=block;" edge="1" parent="2">
+                    <mxGeometry width="80" relative="1" as="geometry">
+                        <mxPoint x="40" y="320" as="sourcePoint"/>
+                        <mxPoint x="260" y="320" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="4" value="Coordinator" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;collapsible=0;recursiveResize=0;outlineConnect=0;" vertex="1" parent="1">
+                    <mxGeometry x="260" y="40" width="80" height="440" as="geometry"/>
+                </mxCell>
+                <mxCell id="11" value="" style="html=1;points=[];perimeter=orthogonalPerimeter;" vertex="1" parent="4">
+                    <mxGeometry x="35" y="190" width="10" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="12" value="building record" style="edgeStyle=orthogonalEdgeStyle;html=1;align=left;spacingLeft=2;endArrow=block;rounded=0;entryX=1;entryY=0;" edge="1" target="11" parent="4">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint x="40" y="170" as="sourcePoint"/>
+                        <Array as="points">
+                            <mxPoint x="65" y="170"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="5" value="Nodo A" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;collapsible=0;recursiveResize=0;outlineConnect=0;" vertex="1" parent="1">
+                    <mxGeometry x="490" y="40" width="80" height="440" as="geometry"/>
+                </mxCell>
+                <mxCell id="6" value="Nodo B" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;collapsible=0;recursiveResize=0;outlineConnect=0;" vertex="1" parent="1">
+                    <mxGeometry x="590" y="40" width="80" height="440" as="geometry"/>
+                </mxCell>
+                <mxCell id="8" value="&lt;span style=&quot;font-family: &amp;#34;droid sans mono&amp;#34; , monospace , monospace , &amp;#34;droid sans fallback&amp;#34; ; text-align: left&quot;&gt;&lt;font style=&quot;font-size: 10px&quot; color=&quot;#3333ff&quot;&gt;AcquireMessage::OkAcquire&lt;/font&gt;&lt;/span&gt;" style="html=1;verticalAlign=bottom;startArrow=oval;startFill=1;endArrow=block;startSize=8;" edge="1" parent="1" source="4" target="2">
+                    <mxGeometry width="60" relative="1" as="geometry">
+                        <mxPoint x="200" y="190" as="sourcePoint"/>
+                        <mxPoint x="260" y="190" as="targetPoint"/>
+                        <Array as="points">
+                            <mxPoint x="280" y="160"/>
+                            <mxPoint x="240" y="160"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="9" value="&lt;span style=&quot;font-family: &amp;#34;droid sans mono&amp;#34; , monospace , monospace , &amp;#34;droid sans fallback&amp;#34; ; text-align: left&quot;&gt;&lt;font style=&quot;font-size: 10px&quot; color=&quot;#3333ff&quot;&gt;AcquireMessage::Acquire&lt;/font&gt;&lt;/span&gt;" style="html=1;verticalAlign=bottom;endArrow=block;" edge="1" parent="1" target="4">
+                    <mxGeometry width="80" relative="1" as="geometry">
+                        <mxPoint x="80" y="110" as="sourcePoint"/>
+                        <mxPoint x="160" y="110" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="10" value="&lt;span style=&quot;font-family: &amp;#34;droid sans mono&amp;#34; , monospace , monospace , &amp;#34;droid sans fallback&amp;#34; ; text-align: left&quot;&gt;&lt;font style=&quot;font-size: 9px&quot; color=&quot;#3333ff&quot;&gt;AddGradeMessage::ToCoordinator(Juan, 10)&lt;/font&gt;&lt;/span&gt;" style="html=1;verticalAlign=bottom;endArrow=block;" edge="1" parent="1" target="4">
+                    <mxGeometry width="80" relative="1" as="geometry">
+                        <mxPoint x="80" y="200" as="sourcePoint"/>
+                        <mxPoint x="290" y="200" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="14" value="&lt;span style=&quot;font-family: &amp;#34;droid sans mono&amp;#34; , monospace , monospace , &amp;#34;droid sans fallback&amp;#34; ; text-align: left&quot;&gt;&lt;font style=&quot;font-size: 7px&quot; color=&quot;#3333ff&quot;&gt;AddGradeMessage::FromCoordinator(BlockchainRecord)&lt;/font&gt;&lt;/span&gt;" style="html=1;verticalAlign=bottom;endArrow=block;" edge="1" parent="1" source="4" target="2">
+                    <mxGeometry x="-0.0038" width="80" relative="1" as="geometry">
+                        <mxPoint x="290" y="300" as="sourcePoint"/>
+                        <mxPoint x="240" y="300" as="targetPoint"/>
+                        <Array as="points">
+                            <mxPoint x="280" y="290"/>
+                            <mxPoint x="230" y="290"/>
+                        </Array>
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="15" value="&lt;span style=&quot;font-family: &amp;#34;droid sans mono&amp;#34; , monospace , monospace , &amp;#34;droid sans fallback&amp;#34; ; text-align: left&quot;&gt;&lt;font style=&quot;font-size: 7px&quot; color=&quot;#3333ff&quot;&gt;AddGradeMessage::FromCoordinator(BlockchainRecord)&lt;/font&gt;&lt;/span&gt;" style="html=1;verticalAlign=bottom;endArrow=block;" edge="1" parent="1" source="4" target="5">
+                    <mxGeometry x="0.0516" width="80" relative="1" as="geometry">
+                        <mxPoint x="534.8300000000003" y="310" as="sourcePoint"/>
+                        <mxPoint x="314.9966666666668" y="310" as="targetPoint"/>
+                        <Array as="points">
+                            <mxPoint x="430" y="300"/>
+                        </Array>
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="16" value="&lt;span style=&quot;font-family: &amp;#34;droid sans mono&amp;#34; , monospace , monospace , &amp;#34;droid sans fallback&amp;#34; ; text-align: left&quot;&gt;&lt;font style=&quot;font-size: 7px&quot; color=&quot;#3333ff&quot;&gt;AddGradeMessage::FromCoordinator(BlockchainRecord)&lt;/font&gt;&lt;/span&gt;" style="html=1;verticalAlign=bottom;endArrow=block;" edge="1" parent="1" target="6">
+                    <mxGeometry x="0.0516" width="80" relative="1" as="geometry">
+                        <mxPoint x="299.9966666666667" y="330" as="sourcePoint"/>
+                        <mxPoint x="529.83" y="330" as="targetPoint"/>
+                        <Array as="points">
+                            <mxPoint x="430.33" y="330"/>
+                        </Array>
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

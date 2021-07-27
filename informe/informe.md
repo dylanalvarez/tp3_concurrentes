@@ -29,3 +29,24 @@ El proceso en cuestión implica:
 3. Si un determinado nodo NO recibe el mensaje `ElectionMessage::OkElection` de ningun otro nodo entonces *éste deberá proclamarse como coordinador*. En este caso, enviará por la red a TODOS los nodos restantes un mensaje `ElectionMessage::Coordinator`, autoproclamandose como lider o coordinador. Cuando los demás nodos lo reciban, actualizarán su referencia al nuevo nodo coordinador.
 
 ## Algoritmo de Exclusión Mutua - Algoritmo Centralizado
+
+En este caso, hemos elegido cumplir esta parte del trabajo implementando un algoritmo de *exclusion mútua distribuida*. Básicamente, se trata de un "mutex" distribuido el cuál los nodos necesariamente necesitan adquirir previo a intentar agregar algun elemento en la *blockchain*. Dicho mutex estará unicamente administrado por el nodo coordinador de turno. El procedimiento a grandes resgos sería el siguiente:
+
+1. Al recibir un mensaje del tipo `add_grade <nombre_alumno> <nota>` por la interfaz de comandos, el nodo deberá solicitar el mutex al nodo coordinador (enviando un mensaje del tipo `AcquireMessage::Acquire`). Luego, no procederá al siguiente paso hasta no recibir una confirmación por parte del nodo supervisor.
+2. El coordinador, al recibir esta petición deberá evaluar lo siguiente:
+   1. Si el mutex distribuido esta *tomado* por otro nodo actualmente, entonces simplemente encolará el pedido para responderlo apenas se libere.
+   2. Si el mutex *no estaba tomado*, entonces lo reserva para este solicitante y le envia la confirmación de que puede continuar (mediante el envio del mensaje `AcquireMessage::OkAcquire`).
+3. Cuando el solicitante reciba la confirmación, procederá a insertar el dato nuevo en la blockchain. Para eso, enviará un mensaje al coordinador del estilo `AddGradeMessage::ToCoordinator(Juan, 10)`.
+   1. Si no recibiera la confirmación en un tiempo apropiado, el nodo considerará al coordinador como "fuera de linea", disparando el proceso de elección de lider nuevamente.
+4. Cuando el coordinador reciba el mensaje para insertar el dato en la Blockchain, lo reenviará a todos sus vecinos en un mensaje del estilo `AddGradeMessage::FromCoordinator(BlockchainRecord)`, en el cuál especifica concretamente cómo es el nuevo bloque a insertar (nombre, nota y hash).
+   1. El recibir este mensaje, todos los nodos insertan el nuevo record en su Blockchain
+5. Cuando finaliza, el nodo solicitante enviará un mensaje `AcquireMessage::Release` al coordinador para soltar el mutex, y disponibilizarlo para futuras peticiones.
+
+![](mutex_distribuido.png)
+
+## Conclusiones del trabajo práctico
+
+Con la implementación del trabajo práctico pudimos aprender y llevar a concreto ciertos conceptos que desarrollamos en la segunda parte de la materia. Entre ellos:
+
+- Implementación de un algoritmo de elección de lider, como fue la implementacion del algoritmo *bully*.
+- Implementacion de algoritmo de exclusion mutua, como fue la implementacion del *mutex distribuido*, administrado por el coordinador.
