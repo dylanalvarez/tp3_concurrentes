@@ -1,19 +1,20 @@
-use std::{env, thread};
 use std::io::{stdin, stdout, Write};
 use std::process::exit;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::{env, thread};
 
 use crate::blockchain::Blockchain;
 use crate::blockchain_node::BlockchainNode;
 use crate::logger::log;
 
 mod acquire_message;
+mod add_grade_message;
 mod blockchain;
+mod blockchain_message;
 mod blockchain_node;
 mod election_message;
 mod ip_parser;
 mod logger;
-mod add_grade_message;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -38,11 +39,18 @@ fn main() {
 
 fn start_node(port: &String, neighbor_addresses: Vec<String>) {
     let numeric_port = port.clone().parse::<usize>().unwrap();
-    let mut node = Arc::new(Mutex::new(BlockchainNode::new(numeric_port, neighbor_addresses.clone())));
+    let mut node = Arc::new(Mutex::new(BlockchainNode::new(
+        numeric_port,
+        neighbor_addresses.clone(),
+    )));
     let cloned_node = node.clone();
+
     thread::spawn(move || {
         BlockchainNode::listen(cloned_node);
     });
+
+    BlockchainNode::ask_for_blockchain(node.clone());
+
     BlockchainNode::begin_election(node.clone());
     loop {
         prompt_loop(node.clone());
@@ -71,7 +79,7 @@ fn execute_command(raw_command: String, node: Arc<Mutex<BlockchainNode>>) {
         "add_grade" => {
             if parsed_command.len() != 3 {
                 println!("Invalid command. add_grade <student name (without spaces)> <student grade (with dot notation. eg: 9.54)>");
-                return
+                return;
             }
             let student_name = parsed_command[1].to_string();
             match parsed_command[2].parse() {
@@ -90,8 +98,10 @@ fn execute_command(raw_command: String, node: Arc<Mutex<BlockchainNode>>) {
         "print" => {
             log(format!("Received print command"));
             match node.lock() {
-                Ok(node) => { node.print() }
-                Err(error) => { panic!(error.to_string()) }
+                Ok(node) => node.print(),
+                Err(error) => {
+                    panic!(error.to_string())
+                }
             }
         }
         "quit" => {
@@ -101,15 +111,19 @@ fn execute_command(raw_command: String, node: Arc<Mutex<BlockchainNode>>) {
         "ping" => {
             log(format!("Received ping command"));
             match node.lock() {
-                Ok(node) => { node.ping_neighbors() }
-                Err(error) => { panic!(error.to_string()) }
+                Ok(node) => node.ping_neighbors(),
+                Err(error) => {
+                    panic!(error.to_string())
+                }
             }
         }
         "make_coordinator" => {
             log(format!("Received make_coordinator command"));
             match node.lock() {
-                Ok(node) => { node.make_coordinator() }
-                Err(error) => { panic!(error.to_string()) }
+                Ok(node) => node.make_coordinator(),
+                Err(error) => {
+                    panic!(error.to_string())
+                }
             }
         }
 

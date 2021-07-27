@@ -1,7 +1,7 @@
 use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-use std::fmt::{Display, Formatter};
 use std::fmt;
+use std::fmt::{Display, Formatter};
+use std::hash::{Hash, Hasher};
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct BlockchainRecord {
@@ -10,6 +10,7 @@ pub struct BlockchainRecord {
     pub hash: u64,
 }
 
+#[derive(PartialEq, Debug)]
 pub struct Blockchain {
     records: Vec<BlockchainRecord>,
 }
@@ -35,7 +36,9 @@ impl fmt::Display for Blockchain {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let mut result = String::new();
         for record in &self.records {
-            result.push_str(format!("{} {} {}\n", record.student_name, record.grade, record.hash).as_str())
+            result.push_str(
+                format!("{} {} {}\n", record.student_name, record.grade, record.hash).as_str(),
+            )
         }
         write!(f, "{}", result)
     }
@@ -83,6 +86,35 @@ impl Blockchain {
             last_hash = generate_hash(&record.student_name, record.grade, last_hash);
         }
         true
+    }
+
+    pub fn from_str(blockchain_as_str: String) -> Blockchain {
+        let splitted_blockhain = blockchain_as_str.split(";").into_iter();
+        let mut new_blockchain = Blockchain::new();
+        for record in splitted_blockhain {
+            let fields = record.split(",").collect::<Vec<&str>>();
+            if fields.len() > 2 {
+                let record = BlockchainRecord {
+                    student_name: fields[0].to_string(),
+                    grade: fields[1].to_string().parse().unwrap(),
+                    hash: fields[2].to_string().parse().unwrap(),
+                };
+                new_blockchain.add_record(record);
+            }
+        }
+        new_blockchain
+    }
+
+    pub fn as_str(&self) -> String {
+        let mut result = String::new();
+        for record in &self.records {
+            result.push_str(&*format!(
+                "{},{},{};",
+                record.student_name, record.grade, record.hash
+            ));
+        }
+        result.pop();
+        result
     }
 }
 
