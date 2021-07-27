@@ -1,5 +1,4 @@
 use crate::blockchain::BlockchainRecord;
-use crate::blockchain_node::BlockchainNode;
 
 #[derive(PartialEq, Debug)]
 pub enum AddGradeMessage {
@@ -8,7 +7,7 @@ pub enum AddGradeMessage {
 }
 
 impl AddGradeMessage {
-    pub fn as_string(self) -> String {
+    pub fn as_string(&self) -> String {
         match self {
             AddGradeMessage::FromCoordinator(record) => {
                 format!(
@@ -23,7 +22,7 @@ impl AddGradeMessage {
     }
 
     pub fn from_string(string: String) -> Option<AddGradeMessage> {
-        let tokens = string.split(";").collect::<Vec<&str>>();
+        let tokens = string.split(';').collect::<Vec<&str>>();
         match tokens[0] {
             "GRADE_FROM_COORDINATOR" => Some(AddGradeMessage::FromCoordinator(BlockchainRecord {
                 student_name: String::from(tokens[1]),

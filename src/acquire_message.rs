@@ -16,11 +16,11 @@ impl AcquireMessage {
     /// ```rust
     /// AcquireMessage::Acquire.as_bytes() // => b'ACQUI'
     /// ```
-    pub fn as_bytes(self) -> [u8; 5] {
+    pub fn as_bytes(&self) -> [u8; 5] {
         match self {
-            AcquireMessage::Acquire => b"ACQUI".clone(),
-            AcquireMessage::OkAcquire => b"OKACQ".clone(),
-            AcquireMessage::Release => b"RELEA".clone(),
+            AcquireMessage::Acquire => *b"ACQUI",
+            AcquireMessage::OkAcquire => *b"OKACQ",
+            AcquireMessage::Release => *b"RELEA",
         }
     }
 

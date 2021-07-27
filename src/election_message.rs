@@ -21,11 +21,11 @@ impl ElectionMessage {
     /// ```rust
     /// ElectionMessage::Election.as_bytes() // => b'E'
     /// ```
-    pub fn as_bytes(self) -> [u8; 1] {
+    pub fn as_bytes(&self) -> [u8; 1] {
         match self {
-            ElectionMessage::Election => b"E".clone(),
-            ElectionMessage::OkElection => b"O".clone(),
-            ElectionMessage::Coordinator => b"C".clone(),
+            ElectionMessage::Election => *b"E",
+            ElectionMessage::OkElection => *b"O",
+            ElectionMessage::Coordinator => *b"C",
         }
     }
 

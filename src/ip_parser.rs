@@ -1,4 +1,4 @@
-pub fn local_address_with_port(port: &String) -> String {
+pub fn local_address_with_port(port: &str) -> String {
     "127.0.0.1:".to_owned() + port
 }
 

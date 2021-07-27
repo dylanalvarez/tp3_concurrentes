@@ -1,9 +1,8 @@
 use std::io::{stdin, stdout, Write};
 use std::process::exit;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::{env, thread};
 
-use crate::blockchain::Blockchain;
 use crate::blockchain_node::BlockchainNode;
 use crate::logger::log;
 
@@ -16,6 +15,7 @@ mod election_message;
 mod ip_parser;
 mod logger;
 
+#[allow(clippy::mutex_atomic)]
 fn main() {
     let args: Vec<String> = env::args().collect();
     log(format!("Received args = {:?}", args));
@@ -34,14 +34,14 @@ fn main() {
         .collect();
     log(format!("neighbor_addresses = {:?}", neighbor_addresses));
 
-    start_node(&port.to_owned(), neighbor_addresses);
+    start_node(&port, neighbor_addresses);
 }
 
-fn start_node(port: &String, neighbor_addresses: Vec<String>) {
-    let numeric_port = port.clone().parse::<usize>().unwrap();
-    let mut node = Arc::new(Mutex::new(BlockchainNode::new(
+fn start_node(port: &str, neighbor_addresses: Vec<String>) {
+    let numeric_port = port.parse::<usize>().unwrap();
+    let node = Arc::new(Mutex::new(BlockchainNode::new(
         numeric_port,
-        neighbor_addresses.clone(),
+        neighbor_addresses,
     )));
     let cloned_node = node.clone();
 
@@ -74,7 +74,7 @@ fn prompt_loop(node: Arc<Mutex<BlockchainNode>>) {
 }
 
 fn execute_command(raw_command: String, node: Arc<Mutex<BlockchainNode>>) {
-    let parsed_command = raw_command.split(" ").collect::<Vec<&str>>();
+    let parsed_command = raw_command.split(' ').collect::<Vec<&str>>();
     match parsed_command[0] {
         "add_grade" => {
             if parsed_command.len() != 3 {
@@ -88,47 +88,47 @@ fn execute_command(raw_command: String, node: Arc<Mutex<BlockchainNode>>) {
                         "Received add_grade command with params: {:?} {:?}",
                         student_name, grade
                     ));
-                    BlockchainNode::add_grade(node, student_name, grade);
+                    let _ = BlockchainNode::add_grade(node, student_name, grade);
                 }
                 Err(_error) => {
-                    log(format!("Invalid grade number for add_grade command"));
+                    log("Invalid grade number for add_grade command".to_string());
                 }
             };
         }
         "print" => {
-            log(format!("Received print command"));
+            log("Received print command".to_string());
             match node.lock() {
                 Ok(node) => node.print(),
                 Err(error) => {
-                    panic!(error.to_string())
+                    panic!("{}", error.to_string())
                 }
             }
         }
         "quit" => {
-            log(format!("Received quit command"));
+            log("Received quit command".to_string());
             exit(0);
         }
         "ping" => {
-            log(format!("Received ping command"));
+            log("Received ping command".to_string());
             match node.lock() {
                 Ok(node) => node.ping_neighbors(),
                 Err(error) => {
-                    panic!(error.to_string())
+                    panic!("{}", error.to_string())
                 }
             }
         }
         "make_coordinator" => {
-            log(format!("Received make_coordinator command"));
+            log("Received make_coordinator command".to_string());
             match node.lock() {
                 Ok(node) => node.make_coordinator(),
                 Err(error) => {
-                    panic!(error.to_string())
+                    panic!("{}", error.to_string())
                 }
             }
         }
 
         "begin_election" => {
-            log(format!("Received begin_election command"));
+            log("Received begin_election command".to_string());
             BlockchainNode::begin_election(node);
         }
 
@@ -136,7 +136,7 @@ fn execute_command(raw_command: String, node: Arc<Mutex<BlockchainNode>>) {
             print!("{esc}[2J{esc}[1;1H", esc = 27 as char);
         }
         _ => {
-            log(format!("Ups! Didn't understand that. Available commands: add_grade, print, quit, ping, make_coordinator, begin_election, clear"));
+            log("Ups! Didn't understand that. Available commands: add_grade, print, quit, ping, make_coordinator, begin_election, clear".to_string());
         }
     }
 }

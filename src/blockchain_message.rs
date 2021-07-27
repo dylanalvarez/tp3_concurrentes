@@ -1,5 +1,4 @@
-use crate::blockchain::{Blockchain, BlockchainRecord};
-use crate::blockchain_node::BlockchainNode;
+use crate::blockchain::Blockchain;
 
 #[derive(PartialEq, Debug)]
 pub enum BlockchainMessage {
@@ -8,11 +7,9 @@ pub enum BlockchainMessage {
 }
 
 impl BlockchainMessage {
-    pub fn as_string(self) -> String {
+    pub fn as_string(&self) -> String {
         match self {
-            BlockchainMessage::AskForBlockchain => {
-                format!("AskForBlockchain")
-            }
+            BlockchainMessage::AskForBlockchain => "AskForBlockchain".to_string(),
             BlockchainMessage::BlockchainResult(blockchain) => {
                 format!("BlockchainResult:{}", blockchain.as_str())
             }
@@ -21,7 +18,7 @@ impl BlockchainMessage {
 
     /// Example: BlockchainResult:asd,10.0,1234;qwe,9.0,5125
     pub fn from_string(string: String) -> Option<BlockchainMessage> {
-        let tokens = string.split(":").collect::<Vec<&str>>();
+        let tokens = string.split(':').collect::<Vec<&str>>();
         match tokens[0] {
             "AskForBlockchain" => Some(BlockchainMessage::AskForBlockchain),
             "BlockchainResult" => Some(BlockchainMessage::BlockchainResult(Blockchain::from_str(
@@ -35,6 +32,7 @@ impl BlockchainMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blockchain::BlockchainRecord;
 
     #[test]
     fn test_ask_for_blockchain_as_string() {
