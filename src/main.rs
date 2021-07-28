@@ -11,6 +11,8 @@ mod add_grade_message;
 mod blockchain;
 mod blockchain_message;
 mod blockchain_node;
+mod coordinator_state;
+mod dist_mutex;
 mod election_message;
 mod ip_parser;
 mod logger;

@@ -2,7 +2,7 @@
 
 ## Algoritmo
 - 1. Creo DistMutex pasandole el socket del nodo y la addr del coordinator. Va a tener mutex: 'taken', 'lock_owner' ; 
-     (mutex<bool>,condvar): 'got_ok_acquire', 'got_ok_release' ; queue: 'pending_locks'
+     (mutex<bool>,condvar): 'got_ok_acquire', 'got_ok_release' ; queue: 'waiting_nodes_queue'
 - 2. Función acquire()
     - 1. Si soy el coordinador o no
         - 1. Si 'taken'==true --> no hacer nada, ya tengo el lock
@@ -24,12 +24,12 @@
             - 2. resetear mutex 'taken'=false y 'got_ok_acquire'=false y liberar control
 - 4. Recibo ACQUIRE por el socket
     - 1. Si soy el coordinador
-        - 1. Si 'taken'==true --> encolar addr del que pidió el ACQUIRE en la queue 'pending_locks'
+        - 1. Si 'taken'==true --> encolar addr del que pidió el ACQUIRE en la queue 'waiting_nodes_queue'
         - 2. Si 'taken'==false
             - 1. Poner mutex 'taken'=true y 'lock_owner'=addr que vino por el socket
             - 2. Responder OK_ACQUIRE por el socket
             - 3. wait_timeout_while('got_ok_release', TIMEOUT_OK_RELEASE)
-                - 1. if 'got_ok_release'==false --> Poner mutex 'taken'=false, 'lock_owner'=null, desencolar de 'pending_locks' y volver a 4.1
+                - 1. if 'got_ok_release'==false --> Poner mutex 'taken'=false, 'lock_owner'=null, desencolar de 'waiting_nodes_queue' y volver a 4.1
                 - 2. if 'got_ok_release'==true --> Poner mutex 'taken'=false, 'lock_owner'=null, 'got_ok_release'=false
     - 2. Si no soy el coordinador --> ignoro
 - 5. Recibo RELEASE por el socket
@@ -38,7 +38,7 @@
         - 2. Si 'taken'==true
             - 0. Enviar NUEVA_NOTA a todos los nodos
             - 1. Poner mutex 'taken'=false, 'lock_owner'=null, 'got_ok_release'=true y notify_all, 
-            - 2. mientras 'pending_locks' no este vacía --> desencolar de 'pending_locks' y volver a 4.1
+            - 2. mientras 'waiting_nodes_queue' no este vacía --> desencolar de 'waiting_nodes_queue' y volver a 4.1
     - 2. Si no soy el coordinador --> ignoro
 - 6. Recibo OK_ACQUIRE por el socket
     - 1. Si soy el coordinador --> ignoro
