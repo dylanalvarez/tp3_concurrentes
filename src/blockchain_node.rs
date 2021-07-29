@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::net::UdpSocket;
+use std::rc::Rc;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 use std::{thread, usize};
@@ -421,10 +423,16 @@ impl BlockchainNode {
     pub fn listen(arc_mutex_self: Arc<Mutex<BlockchainNode>>) {
         let port = { arc_mutex_self.lock().unwrap().port };
         log(format!("Starting to listen on port: {:?}", port));
+        let socket = {
+            let _self = arc_mutex_self.lock().unwrap();
+            _self.socket.try_clone().unwrap()
+        };
+
+        let mut incoming_messages: HashMap<String, String>  = HashMap::new();
+
         loop {
             let mut buf = [0; 1000];
-            let socket = { arc_mutex_self.lock().unwrap().socket.try_clone() };
-            match socket.unwrap().recv_from(&mut buf) {
+            match socket.recv_from(&mut buf) {
                 Ok((size, from)) => {
                     let received = Vec::from(&buf[0..size]);
                     let str_received = String::from_utf8(received).unwrap();
@@ -434,9 +442,27 @@ impl BlockchainNode {
                     ));
                     let neighbor = from.to_string();
                     let clone = arc_mutex_self.clone();
-                    thread::spawn(move || {
-                        BlockchainNode::handle_incoming_message(clone, &str_received, &neighbor);
-                    });
+
+                    let last_message : &mut String = incoming_messages.entry(neighbor.clone()).or_insert(String::from(&str_received));
+
+                    let last_message : Option<&mut String> = incoming_messages.get_mut(&neighbor);
+                    match last_message {
+                        Some(last_message) => {
+                            last_message.push_str(&str_received);
+                        }
+
+                        None => {
+                            incoming_messages.insert(neighbor.clone(), String::from(&str_received));
+                        }
+                    };
+                    let last_message: &String = incoming_messages.get(&neighbor).unwrap();
+                    if  last_message.chars().last().unwrap() == '\n' {
+                        let message_to_process: &mut String = incoming_messages.get_mut(&neighbor).unwrap();
+                        message_to_process.pop();
+                        thread::spawn(move || {
+                            BlockchainNode::handle_incoming_message(clone, &message_to_process, &neighbor);
+                        });
+                    }
                 }
                 Err(error) => print!("Error while listening on port: {:?}", error),
             }
