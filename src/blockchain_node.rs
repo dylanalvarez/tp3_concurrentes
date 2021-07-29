@@ -21,7 +21,7 @@ pub struct BlockchainNode {
     blockchain: Blockchain,
     got_ok: Arc<(Mutex<bool>, Condvar)>,
     is_in_election: Arc<(Mutex<bool>, Condvar)>,
-    can_begin_election: Arc<(Mutex<bool>, Condvar)>,
+    synchronization_done: Arc<(Mutex<bool>, Condvar)>,
     pub dist_mutex: DistMutex,
     pub coordinator_state: CoordinatorState,
 }
@@ -64,7 +64,7 @@ impl BlockchainNode {
             blockchain: Blockchain::new(),
             got_ok: Arc::new((Mutex::new(false), Condvar::new())),
             is_in_election: Arc::new((Mutex::new(false), Condvar::new())),
-            can_begin_election: Arc::new((Mutex::new(false), Condvar::new())),
+            synchronization_done: Arc::new((Mutex::new(false), Condvar::new())),
             dist_mutex,
             coordinator_state,
         }
@@ -384,20 +384,16 @@ impl BlockchainNode {
         sender: &str,
     ) {
         let _self = arc_mutex_self.lock().unwrap();
-
-        let leader_port = _self.leader_port.lock().unwrap().unwrap();
-        if _self.port == leader_port {
-            let blockchain_result_message =
-                BlockchainMessage::BlockchainResult(_self.blockchain.clone()).as_string();
-            log(format!(
-                "Sending BlockchainResult {:?} to : {:?}",
-                _self.blockchain, sender
-            ));
-            _self
-                .socket
-                .send_to(blockchain_result_message.as_bytes(), sender)
-                .unwrap();
-        }
+        let blockchain_result_message =
+            BlockchainMessage::BlockchainResult(_self.blockchain.clone()).as_string();
+        log(format!(
+            "Sending BlockchainResult {:?} to : {:?}",
+            _self.blockchain, sender
+        ));
+        _self
+            .socket
+            .send_to(blockchain_result_message.as_bytes(), sender)
+            .unwrap();
     }
 
     #[allow(clippy::mutex_atomic)]
@@ -406,16 +402,20 @@ impl BlockchainNode {
         sender: &str,
         blockchain: Blockchain,
     ) {
+        let mut _self = arc_mutex_self.lock().unwrap();
+        if *_self.synchronization_done.0.lock().unwrap() {
+            log("I was already synchronized. Skipping..".to_string());
+            return;
+        }
         log(format!(
             "Processing BlockchainResult message from : {:?} content: {:?}",
             sender, blockchain
         ));
-        let mut _self = arc_mutex_self.lock().unwrap();
         _self.blockchain = blockchain;
         log(format!("Current blockchain is: {:?}", _self.blockchain));
-        *_self.can_begin_election.0.lock().unwrap() = true;
-        _self.can_begin_election.1.notify_all();
-        log("Notifying can_begin_election condvar".to_string());
+        *_self.synchronization_done.0.lock().unwrap() = true;
+        _self.synchronization_done.1.notify_all();
+        log("Notifying synchronization_done condvar".to_string());
     }
 
     pub fn listen(arc_mutex_self: Arc<Mutex<BlockchainNode>>) {
@@ -525,16 +525,6 @@ impl BlockchainNode {
     /// Comienza el proceso de eleccion de lider.
     /// Al finalizar, el nodo con número de puerto mas grande es quien queda como coordinador.
     pub fn begin_election(arc_mutex_self: Arc<Mutex<BlockchainNode>>) {
-        const CAN_BEGIN_ELECTION_TIMEOUT: Duration = Duration::from_secs(1);
-        let _can_begin_election = { arc_mutex_self.lock().unwrap().can_begin_election.clone() };
-        log("Waiting for can_begin_election condvar".to_string());
-        let _can_begin_election_condvar = _can_begin_election.1.wait_timeout_while(
-            _can_begin_election.0.lock().unwrap(),
-            CAN_BEGIN_ELECTION_TIMEOUT,
-            |cannot_begin| !*cannot_begin,
-        );
-        log("Done waiting for can_begin_election condvar".to_string());
-
         match arc_mutex_self.lock() {
             Ok(_self) => {
                 if *_self.is_in_election.0.lock().unwrap() {
@@ -567,10 +557,11 @@ impl BlockchainNode {
         }
 
         log("Enviando mensaje ELECTION a vecinos. Esperando sus respuestas...".to_string());
+        const OK_ELECTION_TIMEOUT: Duration = Duration::from_secs(1);
         let _got_ok = { arc_mutex_self.lock().unwrap().got_ok.clone() };
         let got_ok = _got_ok.1.wait_timeout_while(
             _got_ok.0.lock().unwrap(),
-            CAN_BEGIN_ELECTION_TIMEOUT,
+            OK_ELECTION_TIMEOUT,
             |got_it| !*got_it,
         );
         if !*got_ok.unwrap().0 {
@@ -608,18 +599,35 @@ impl BlockchainNode {
         }
     }
 
+    #[allow(clippy::mutex_atomic)]
     pub fn ask_for_blockchain(arc_mutex_self: Arc<Mutex<BlockchainNode>>) {
-        let _self = arc_mutex_self.lock().unwrap();
-        for neighbor in &_self.neighbor_addresses {
+        let (neighbor_addresses, socket, synchronization_done) = {
+            let _self = arc_mutex_self.lock().unwrap();
+            (
+                _self.neighbor_addresses.clone(),
+                _self.socket.try_clone().unwrap(),
+                _self.synchronization_done.clone(),
+            )
+        };
+        for neighbor in &neighbor_addresses {
             log(format!(
                 "\t\tEnviando mensaje AskForBlockchain a {:?}",
                 neighbor
             ));
             let message_to_send = BlockchainMessage::AskForBlockchain.as_string();
-            _self
-                .socket
+            socket
                 .send_to(&message_to_send.as_bytes(), neighbor)
                 .unwrap();
         }
+
+        const SYNCHRONIZATION_DONE_TIMEOUT: Duration = Duration::from_secs(1);
+        let _synchronization_done = synchronization_done;
+        log("Waiting for synchronization_done condvar".to_string());
+        let _synchronization_done_condvar = _synchronization_done.1.wait_timeout_while(
+            _synchronization_done.0.lock().unwrap(),
+            SYNCHRONIZATION_DONE_TIMEOUT,
+            |cannot_begin| !*cannot_begin,
+        );
+        log("Done waiting for synchronization_done condvar".to_string());
     }
 }
