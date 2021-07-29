@@ -18,6 +18,8 @@ mod ip_parser;
 mod logger;
 mod sender;
 
+pub const BUFFER_SIZE: usize = 2;
+
 #[allow(clippy::mutex_atomic)]
 fn main() {
     let args: Vec<String> = env::args().collect();

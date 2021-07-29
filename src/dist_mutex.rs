@@ -4,8 +4,8 @@ use std::{
     time::Duration,
 };
 
-use crate::{acquire_message::AcquireMessage, blockchain_node::BlockchainNode, logger::log};
 use crate::sender::send;
+use crate::{acquire_message::AcquireMessage, blockchain_node::BlockchainNode, logger::log};
 
 pub struct DistMutex {
     pub coordinator_addr: String,
@@ -33,11 +33,10 @@ impl DistMutex {
                 node.dist_mutex.coordinator_addr
             ));
             send(
-                node.dist_mutex
-                    .socket_to_coordinator.try_clone().unwrap(),
-                    &AcquireMessage::Acquire.as_bytes(),
-                    &node.dist_mutex.coordinator_addr,
-                );
+                node.dist_mutex.socket_to_coordinator.try_clone().unwrap(),
+                &AcquireMessage::Acquire.as_bytes(),
+                &node.dist_mutex.coordinator_addr,
+            );
 
             log("Waiting for OK_ACQUIRE message".to_string());
         }
@@ -77,7 +76,7 @@ impl DistMutex {
         send(
             self.socket_to_coordinator.try_clone().unwrap(),
             &AcquireMessage::Release.as_bytes(),
-            &self.coordinator_addr.clone()
+            &self.coordinator_addr.clone(),
         );
     }
 

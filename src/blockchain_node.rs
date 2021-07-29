@@ -14,6 +14,7 @@ use crate::election_message::ElectionMessage;
 use crate::ip_parser;
 use crate::logger::log;
 use crate::sender::send;
+use crate::BUFFER_SIZE;
 
 pub struct BlockchainNode {
     port: usize,
@@ -131,9 +132,9 @@ impl BlockchainNode {
                         AddGradeMessage::FromCoordinator(
                             _self.blockchain.last_record().unwrap().clone(),
                         )
-                            .as_string()
-                            .as_bytes(),
-                        neighbor_addr
+                        .as_string()
+                        .as_bytes(),
+                        neighbor_addr,
                     );
                 }
                 log(format!(
@@ -163,11 +164,7 @@ impl BlockchainNode {
                 if let Some(port) = ip_parser::get_port_from_dir(sender) {
                     if self_port > port {
                         let message_to_send = ElectionMessage::OkElection.as_bytes();
-                        send(
-                            socket,
-                            &message_to_send,
-                            sender
-                        );
+                        send(socket, &message_to_send, sender);
                         thread::spawn(move || {
                             BlockchainNode::begin_election(arc_mutex_self);
                         });
@@ -262,11 +259,7 @@ impl BlockchainNode {
                         .set_lock_owner_addr(sender.to_string());
                 }
                 let ok_acquire_message = AcquireMessage::OkAcquire.as_bytes();
-                send(
-                    socket.unwrap(),
-                    &ok_acquire_message,
-                    sender
-                );
+                send(socket.unwrap(), &ok_acquire_message, sender);
                 log(String::from("Sent OK_ACQUIRE"));
 
                 const OK_RELEASE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -401,7 +394,7 @@ impl BlockchainNode {
         send(
             _self.socket.try_clone().unwrap(),
             blockchain_result_message.as_bytes(),
-            sender
+            sender,
         );
     }
 
@@ -435,10 +428,10 @@ impl BlockchainNode {
             _self.socket.try_clone().unwrap()
         };
 
-        let mut incoming_messages: HashMap<String, String>  = HashMap::new();
+        let mut incoming_messages: HashMap<String, String> = HashMap::new();
 
         loop {
-            let mut buf = [0; 1000];
+            let mut buf = [0; BUFFER_SIZE];
             match socket.recv_from(&mut buf) {
                 Ok((size, from)) => {
                     let received = Vec::from(&buf[0..size]);
@@ -461,7 +454,7 @@ impl BlockchainNode {
                             String::from(&str_received)
                         }
                     };
-                    if message.chars().last().unwrap() == '\n' {
+                    if message.ends_with('\n') {
                         message.pop();
                         incoming_messages.insert(neighbor.clone(), String::new());
                         thread::spawn(move || {
@@ -488,7 +481,7 @@ impl BlockchainNode {
         send(
             self.socket.try_clone().unwrap(),
             "PING".as_bytes(),
-            dest_addr.as_str()
+            dest_addr.as_str(),
         );
     }
 
@@ -522,7 +515,7 @@ impl BlockchainNode {
                         AddGradeMessage::ToCoordinator(_name, _note)
                             .as_string()
                             .as_bytes(),
-                        _self.dist_mutex.coordinator_addr.clone().as_str()
+                        _self.dist_mutex.coordinator_addr.clone().as_str(),
                     );
                     log(String::from("despues de enviar el TO COORDINATOR"));
                 }
@@ -578,7 +571,7 @@ impl BlockchainNode {
                             send(
                                 _self.socket.try_clone().unwrap(),
                                 &message_to_send,
-                                neighbor
+                                neighbor,
                             );
                         }
 
@@ -632,11 +625,7 @@ impl BlockchainNode {
         for neighbor in &self.neighbor_addresses {
             log(format!("\t\tEnviando mensaje COORDINATOR a {:?}", neighbor));
             let message_to_send = ElectionMessage::Coordinator.as_bytes();
-            send(
-                self.socket.try_clone().unwrap(),
-                &message_to_send,
-                neighbor
-            );
+            send(self.socket.try_clone().unwrap(), &message_to_send, neighbor);
         }
     }
 
@@ -659,7 +648,7 @@ impl BlockchainNode {
             send(
                 socket.try_clone().unwrap(),
                 message_to_send.as_bytes(),
-                neighbor
+                neighbor,
             );
         }
 
