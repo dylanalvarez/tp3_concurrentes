@@ -16,6 +16,7 @@ mod dist_mutex;
 mod election_message;
 mod ip_parser;
 mod logger;
+mod sender;
 
 #[allow(clippy::mutex_atomic)]
 fn main() {

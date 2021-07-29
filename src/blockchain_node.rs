@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::net::UdpSocket;
-use std::rc::Rc;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 use std::{thread, usize};
@@ -14,6 +13,7 @@ use crate::dist_mutex::DistMutex;
 use crate::election_message::ElectionMessage;
 use crate::ip_parser;
 use crate::logger::log;
+use crate::sender::send;
 
 pub struct BlockchainNode {
     port: usize,
@@ -126,13 +126,14 @@ impl BlockchainNode {
                 let mut _self = arc_mutex_self.lock().unwrap();
                 _self.blockchain.add_grade(student_name.clone(), grade);
                 for neighbor_addr in _self.neighbor_addresses.iter() {
-                    let _ = _self.socket.send_to(
+                    send(
+                        _self.socket.try_clone().unwrap(),
                         AddGradeMessage::FromCoordinator(
                             _self.blockchain.last_record().unwrap().clone(),
                         )
-                        .as_string()
-                        .as_bytes(),
-                        neighbor_addr,
+                            .as_string()
+                            .as_bytes(),
+                        neighbor_addr
                     );
                 }
                 log(format!(
@@ -162,7 +163,11 @@ impl BlockchainNode {
                 if let Some(port) = ip_parser::get_port_from_dir(sender) {
                     if self_port > port {
                         let message_to_send = ElectionMessage::OkElection.as_bytes();
-                        socket.send_to(&message_to_send, sender).unwrap();
+                        send(
+                            socket,
+                            &message_to_send,
+                            sender
+                        );
                         thread::spawn(move || {
                             BlockchainNode::begin_election(arc_mutex_self);
                         });
@@ -257,10 +262,11 @@ impl BlockchainNode {
                         .set_lock_owner_addr(sender.to_string());
                 }
                 let ok_acquire_message = AcquireMessage::OkAcquire.as_bytes();
-                socket
-                    .unwrap()
-                    .send_to(&ok_acquire_message, sender)
-                    .unwrap();
+                send(
+                    socket.unwrap(),
+                    &ok_acquire_message,
+                    sender
+                );
                 log(String::from("Sent OK_ACQUIRE"));
 
                 const OK_RELEASE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -392,10 +398,11 @@ impl BlockchainNode {
             "Sending BlockchainResult {:?} to : {:?}",
             _self.blockchain, sender
         ));
-        _self
-            .socket
-            .send_to(blockchain_result_message.as_bytes(), sender)
-            .unwrap();
+        send(
+            _self.socket.try_clone().unwrap(),
+            blockchain_result_message.as_bytes(),
+            sender
+        );
     }
 
     #[allow(clippy::mutex_atomic)]
@@ -443,24 +450,22 @@ impl BlockchainNode {
                     let neighbor = from.to_string();
                     let clone = arc_mutex_self.clone();
 
-                    let last_message : &mut String = incoming_messages.entry(neighbor.clone()).or_insert(String::from(&str_received));
-
-                    let last_message : Option<&mut String> = incoming_messages.get_mut(&neighbor);
-                    match last_message {
+                    let mut message = match incoming_messages.get_mut(&neighbor) {
                         Some(last_message) => {
                             last_message.push_str(&str_received);
+                            last_message.clone()
                         }
 
                         None => {
                             incoming_messages.insert(neighbor.clone(), String::from(&str_received));
+                            String::from(&str_received)
                         }
                     };
-                    let last_message: &String = incoming_messages.get(&neighbor).unwrap();
-                    if  last_message.chars().last().unwrap() == '\n' {
-                        let message_to_process: &mut String = incoming_messages.get_mut(&neighbor).unwrap();
-                        message_to_process.pop();
+                    if message.chars().last().unwrap() == '\n' {
+                        message.pop();
+                        incoming_messages.insert(neighbor.clone(), String::new());
                         thread::spawn(move || {
-                            BlockchainNode::handle_incoming_message(clone, &message_to_process, &neighbor);
+                            BlockchainNode::handle_incoming_message(clone, &message, &neighbor);
                         });
                     }
                 }
@@ -480,7 +485,11 @@ impl BlockchainNode {
             "Sending ping to neighbor with addr: {:?}",
             dest_addr
         ));
-        self.socket.send_to("PING".as_bytes(), dest_addr).unwrap();
+        send(
+            self.socket.try_clone().unwrap(),
+            "PING".as_bytes(),
+            dest_addr.as_str()
+        );
     }
 
     pub fn make_coordinator(&self) {
@@ -508,15 +517,13 @@ impl BlockchainNode {
                 {
                     log(String::from("antes de enviar el TO COORDINATOR"));
                     let _self = arc_mutex_self.lock().unwrap();
-                    _self
-                        .socket
-                        .send_to(
-                            AddGradeMessage::ToCoordinator(_name, _note)
-                                .as_string()
-                                .as_bytes(),
-                            _self.dist_mutex.coordinator_addr.clone(),
-                        )
-                        .unwrap();
+                    send(
+                        _self.socket.try_clone().unwrap(),
+                        AddGradeMessage::ToCoordinator(_name, _note)
+                            .as_string()
+                            .as_bytes(),
+                        _self.dist_mutex.coordinator_addr.clone().as_str()
+                    );
                     log(String::from("despues de enviar el TO COORDINATOR"));
                 }
                 {
@@ -568,7 +575,11 @@ impl BlockchainNode {
                             }
                             log(format!("\t\tSending ELECTION to {:?}", neighbor));
                             let message_to_send = ElectionMessage::Election.as_bytes();
-                            _self.socket.send_to(&message_to_send, neighbor).unwrap();
+                            send(
+                                _self.socket.try_clone().unwrap(),
+                                &message_to_send,
+                                neighbor
+                            );
                         }
 
                         None => {
@@ -621,7 +632,11 @@ impl BlockchainNode {
         for neighbor in &self.neighbor_addresses {
             log(format!("\t\tEnviando mensaje COORDINATOR a {:?}", neighbor));
             let message_to_send = ElectionMessage::Coordinator.as_bytes();
-            self.socket.send_to(&message_to_send, neighbor).unwrap();
+            send(
+                self.socket.try_clone().unwrap(),
+                &message_to_send,
+                neighbor
+            );
         }
     }
 
@@ -641,9 +656,11 @@ impl BlockchainNode {
                 neighbor
             ));
             let message_to_send = BlockchainMessage::AskForBlockchain.as_string();
-            socket
-                .send_to(&message_to_send.as_bytes(), neighbor)
-                .unwrap();
+            send(
+                socket.try_clone().unwrap(),
+                message_to_send.as_bytes(),
+                neighbor
+            );
         }
 
         const SYNCHRONIZATION_DONE_TIMEOUT: Duration = Duration::from_secs(1);
